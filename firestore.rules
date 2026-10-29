@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    // Health check and connection validation document
+    match /test/{docId} {
+      allow read, write: if isValidId(docId);
+    }
+
+    // Products: public read for online catalog, write for system updates
+    match /productos/{productoId} {
+      allow read: if true;
+      allow write: if isValidId(productoId);
+    }
+
+    // Online web orders placed by customers
+    match /pedidos_online/{pedidoId} {
+      allow read: if true;
+      allow create: if isValidId(pedidoId);
+      allow update, delete: if isValidId(pedidoId);
+    }
+
+    // Enterprise configuration and daily exchange rate
+    match /empresa_config/{configId} {
+      allow read: if true;
+      allow write: if isValidId(configId);
+    }
+
+    // Digital store configuration (WhatsApp, Pago Móvil, Delivery)
+    match /tienda_config/{configId} {
+      allow read: if true;
+      allow write: if isValidId(configId);
+    }
+
+    // POS sales and invoices
+    match /ventas/{ventaId} {
+      allow read, write: if isValidId(ventaId);
+    }
+
+    // Default match for other collections (inventario, sucursales, auditoria)
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

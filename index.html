@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>Sistema Multi-Sucursal POS</title>
+    <meta name="description" content="Sistema POS multi-sucursal con doble moneda (USD y Bolívares), procesamiento inteligente de facturas de compras con IA (imagen/PDF), control de inventario, roles (RBAC), Ventas, Compras, Clientes, Proveedores, CxC, CxP, Dashboard y Reportes." />
+    <meta property="og:title" content="Sistema Multi-Sucursal POS" />
+    <meta property="og:description" content="Sistema POS multi-sucursal con doble moneda (USD y Bolívares), procesamiento inteligente de facturas de compras con IA (imagen/PDF), control de inventario, roles (RBAC), Ventas, Compras, Clientes, Proveedores, CxC, CxP, Dashboard y Reportes." />
+    <script>
+      // Gracefully silence benign WebSocket hot-reload rejection logs in embedded Cloud Run preview
+      window.addEventListener('unhandledrejection', function(e) {
+        if (e.reason && (e.reason.message?.includes('WebSocket') || String(e.reason).includes('WebSocket'))) {
+          e.preventDefault();
+        }
+      });
+    </script>
+  </head>
+  <body class="bg-slate-950 text-slate-100 antialiased selection:bg-emerald-500 selection:text-slate-950">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

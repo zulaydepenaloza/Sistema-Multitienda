@@ -1,0 +1,191 @@
+import { RegistroAuditoria, Usuario } from '../types';
+
+export function createAuditEntry(
+  user: Usuario | null,
+  modulo: RegistroAuditoria['modulo'],
+  tipo_accion: RegistroAuditoria['tipo_accion'],
+  descripcion: string,
+  options?: {
+    detalles?: string;
+    sucursal_nombre?: string;
+    sucursal_id?: number | null;
+  }
+): RegistroAuditoria {
+  const now = new Date();
+  const fechaStr = now.toLocaleDateString('es-VE', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const horaStr = now.toLocaleTimeString('es-VE', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+  });
+
+  let sucursalNombre = options?.sucursal_nombre;
+  if (!sucursalNombre) {
+    if (user?.sucursal_id === 1) sucursalNombre = 'Tienda 1 - Centro';
+    else if (user?.sucursal_id === 2) sucursalNombre = 'Tienda 2 - Norte';
+    else if (user?.sucursal_id === 3) sucursalNombre = 'Oficina Central / Almacén';
+    else sucursalNombre = 'Todas las Sucursales (Global)';
+  }
+
+  return {
+    id: `aud-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    fecha: fechaStr,
+    hora: horaStr,
+    timestamp: now.toISOString(),
+    usuario_id: user?.id,
+    usuario_nombre: user?.nombre_completo || 'Sistema Automático',
+    usuario_username: user?.username || 'sistema',
+    usuario_rol: user?.rol || 'admin',
+    usuario_cargo: user?.cargo || 'Operador del Sistema',
+    sucursal_id: options?.sucursal_id !== undefined ? options.sucursal_id : (user?.sucursal_id ?? null),
+    sucursal_nombre: sucursalNombre,
+    modulo,
+    tipo_accion,
+    descripcion,
+    detalles: options?.detalles,
+  };
+}
+
+export const INITIAL_AUDITORIA_LOGS: RegistroAuditoria[] = [
+  {
+    id: 'aud-init-01',
+    fecha: new Date(Date.now() - 3600000 * 24 * 2).toLocaleDateString('es-VE'),
+    hora: '08:30:15 AM',
+    timestamp: new Date(Date.now() - 3600000 * 24 * 2).toISOString(),
+    usuario_id: 12,
+    usuario_nombre: 'Administrador General',
+    usuario_username: 'admin_general',
+    usuario_rol: 'admin',
+    usuario_cargo: 'Gerente General / Admin Sistema',
+    sucursal_id: null,
+    sucursal_nombre: 'Todas las Sucursales (Global)',
+    modulo: 'Tasa de Cambio',
+    tipo_accion: 'MODIFICAR',
+    descripcion: 'Apertura de tasa de cambio oficial del día fijada en 36.50 Bs/USD.',
+    detalles: 'Tasa cambiaria fijada según BCV para operaciones comerciales en todas las cajas.',
+  },
+  {
+    id: 'aud-init-02',
+    fecha: new Date(Date.now() - 3600000 * 24 * 2 + 1800000).toLocaleDateString('es-VE'),
+    hora: '09:00:22 AM',
+    timestamp: new Date(Date.now() - 3600000 * 24 * 2 + 1800000).toISOString(),
+    usuario_id: 1,
+    usuario_nombre: 'Ana Morales',
+    usuario_username: 'cajero1_t1',
+    usuario_rol: 'cajero',
+    usuario_cargo: 'Cajera Principal',
+    sucursal_id: 1,
+    sucursal_nombre: 'Tienda 1 - Centro',
+    modulo: 'Seguridad',
+    tipo_accion: 'ACCESO',
+    descripcion: 'Inicio de turno y apertura de caja registradora #1 en Tienda 1.',
+    detalles: 'Verificación de PIN 1001 satisfactoria. Fondo de caja recibido.',
+  },
+  {
+    id: 'aud-init-03',
+    fecha: new Date(Date.now() - 3600000 * 24 * 2 + 3600000).toLocaleDateString('es-VE'),
+    hora: '09:32:40 AM',
+    timestamp: new Date(Date.now() - 3600000 * 24 * 2 + 3600000).toISOString(),
+    usuario_id: 1,
+    usuario_nombre: 'Ana Morales',
+    usuario_username: 'cajero1_t1',
+    usuario_rol: 'cajero',
+    usuario_cargo: 'Cajera Principal',
+    sucursal_id: 1,
+    sucursal_nombre: 'Tienda 1 - Centro',
+    modulo: 'POS / Ventas',
+    tipo_accion: 'VENTA',
+    descripcion: 'Venta #1 registrada por $12.40 a Cliente Mostrador (Pago Móvil ref: 994821).',
+    detalles: 'Items: 2x Arroz Integral 1kg ($5.00), 1x Aceite Vegetal 1L ($4.80), 1x Harina ($1.75). IVA: $1.71.',
+  },
+  {
+    id: 'aud-init-04',
+    fecha: new Date(Date.now() - 3600000 * 24 + 7200000).toLocaleDateString('es-VE'),
+    hora: '10:45:10 AM',
+    timestamp: new Date(Date.now() - 3600000 * 24 + 7200000).toISOString(),
+    usuario_id: 9,
+    usuario_nombre: 'Jorge Martínez',
+    usuario_username: 'inv_jefe',
+    usuario_rol: 'inventario',
+    usuario_cargo: 'Jefe de Almacén e Inventarios',
+    sucursal_id: 3,
+    sucursal_nombre: 'Oficina Central / Almacén',
+    modulo: 'Compras',
+    tipo_accion: 'COMPRA',
+    descripcion: 'Recepción de compra de mercancía #1 a Alimentos Polar Comercial C.A. por $850.00.',
+    detalles: 'Factura FAC-POL-88392. Ingresaron 200 uds de Arroz y 100 uds de Café Molido.',
+  },
+  {
+    id: 'aud-init-05',
+    fecha: new Date(Date.now() - 3600000 * 24 + 10800000).toLocaleDateString('es-VE'),
+    hora: '11:15:00 AM',
+    timestamp: new Date(Date.now() - 3600000 * 24 + 10800000).toISOString(),
+    usuario_id: 11,
+    usuario_nombre: 'Luis Navarro',
+    usuario_username: 'inv_operador2',
+    usuario_rol: 'inventario',
+    usuario_cargo: 'Encargado de Traspasos y Recepción',
+    sucursal_id: 3,
+    sucursal_nombre: 'Oficina Central / Almacén',
+    modulo: 'Inventario',
+    tipo_accion: 'TRASPASO',
+    descripcion: 'Traspaso de 50 unidades de Arroz Integral desde Oficina Central hacia Tienda 1 - Centro.',
+    detalles: 'Guía de despacho interna #TR-004. Saldo actualizado en destino.',
+  },
+  {
+    id: 'aud-init-06',
+    fecha: new Date(Date.now() - 3600000 * 12).toLocaleDateString('es-VE'),
+    hora: '02:20:18 PM',
+    timestamp: new Date(Date.now() - 3600000 * 12).toISOString(),
+    usuario_id: 12,
+    usuario_nombre: 'Administrador General',
+    usuario_username: 'admin_general',
+    usuario_rol: 'admin',
+    usuario_cargo: 'Gerente General / Admin Sistema',
+    sucursal_id: null,
+    sucursal_nombre: 'Todas las Sucursales (Global)',
+    modulo: 'Configuración',
+    tipo_accion: 'MODIFICAR',
+    descripcion: 'Actualización de permisos y PIN de seguridad para Carlos Pérez (Cajero Turno Tarde).',
+    detalles: 'Asignación de permisos al módulo de Ventas y verificación de PIN de acceso.',
+  },
+  {
+    id: 'aud-init-07',
+    fecha: new Date(Date.now() - 3600000 * 5).toLocaleDateString('es-VE'),
+    hora: '04:10:05 PM',
+    timestamp: new Date(Date.now() - 3600000 * 5).toISOString(),
+    usuario_id: 4,
+    usuario_nombre: 'Elena Rivas',
+    usuario_username: 'supervisor_t1',
+    usuario_rol: 'supervisor',
+    usuario_cargo: 'Supervisora Tienda 1',
+    sucursal_id: 1,
+    sucursal_nombre: 'Tienda 1 - Centro',
+    modulo: 'Reportes / Fiscal',
+    tipo_accion: 'CORTE_FISCAL',
+    descripcion: 'Generación y cierre de Corte Fiscal X (Arqueo Parcial de Turno) en Tienda 1.',
+    detalles: 'Correlativo #X-001 emitido. Total recaudado verificado contra billetes en caja.',
+  },
+  {
+    id: 'aud-init-08',
+    fecha: new Date(Date.now() - 3600000).toLocaleDateString('es-VE'),
+    hora: '07:45:30 PM',
+    timestamp: new Date(Date.now() - 3600000).toISOString(),
+    usuario_id: 12,
+    usuario_nombre: 'Administrador General',
+    usuario_username: 'admin_general',
+    usuario_rol: 'admin',
+    usuario_cargo: 'Gerente General / Admin Sistema',
+    sucursal_id: null,
+    sucursal_nombre: 'Todas las Sucursales (Global)',
+    modulo: 'CxC',
+    tipo_accion: 'COBRO',
+    descripcion: 'Abono a cuenta por cobrar registrado por $50.00 para Distribuidora Los Andes C.A.',
+    detalles: 'Método: Transferencia bancaria. Saldo pendiente reducido a $70.50.',
+  },
+];

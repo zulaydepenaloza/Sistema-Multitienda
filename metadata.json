@@ -1,0 +1,6 @@
+{
+  "name": "Sistema Multi-Sucursal POS",
+  "description": "Sistema POS multi-sucursal con doble moneda (USD y Bolívares), procesamiento inteligente de facturas de compras con IA (imagen/PDF), control de inventario, roles (RBAC), Ventas, Compras, Clientes, Proveedores, CxC, CxP, Dashboard y Reportes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

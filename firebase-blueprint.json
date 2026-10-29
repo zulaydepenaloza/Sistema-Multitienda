@@ -1,0 +1,107 @@
+{
+  "entities": {
+    "Producto": {
+      "title": "Producto",
+      "description": "Producto del catálogo comercial con precios e inventario",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "Identificador numérico único" },
+        "codigo_barra": { "type": "string", "description": "Código de barras o SKU" },
+        "nombre": { "type": "string", "description": "Nombre comercial del producto" },
+        "categoria": { "type": "string", "description": "Categoría comercial" },
+        "precio": { "type": "number", "description": "Precio base en USD" },
+        "costo": { "type": "number", "description": "Costo de adquisición en USD" },
+        "stock_minimo": { "type": "number", "description": "Nivel de stock mínimo para alertas" },
+        "exento_iva": { "type": "boolean", "description": "Indica si el producto está exento de IVA" },
+        "imagen_url": { "type": "string", "description": "URL de imagen del producto" }
+      },
+      "required": ["id", "codigo_barra", "nombre", "precio"]
+    },
+    "PedidoOnline": {
+      "title": "PedidoOnline",
+      "description": "Pedido en línea generado desde la tienda virtual por un cliente",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Identificador único del pedido web" },
+        "fecha": { "type": "string", "description": "Fecha y hora en formato ISO" },
+        "clienteNombre": { "type": "string", "description": "Nombre del cliente" },
+        "clienteTelefono": { "type": "string", "description": "Número de teléfono del cliente" },
+        "clienteCedula": { "type": "string", "description": "Cédula o RIF del cliente" },
+        "direccionEntrega": { "type": "string", "description": "Dirección para delivery o notas de retiro" },
+        "tipoEntrega": { "type": "string", "enum": ["delivery", "retiro"], "description": "Modalidad de entrega" },
+        "metodoPago": { "type": "string", "description": "Método de pago seleccionado" },
+        "total": { "type": "number", "description": "Total del pedido en USD" },
+        "totalBs": { "type": "number", "description": "Total del pedido en Bolívares" },
+        "tasaCambio": { "type": "number", "description": "Tasa de cambio aplicada" },
+        "estado": { "type": "string", "enum": ["pendiente", "confirmado", "en_camino", "entregado", "cancelado"], "description": "Estado del pedido" }
+      },
+      "required": ["id", "fecha", "clienteNombre", "clienteTelefono", "total", "estado"]
+    },
+    "EmpresaConfig": {
+      "title": "EmpresaConfig",
+      "description": "Configuración institucional y tasa de cambio del comercio",
+      "type": "object",
+      "properties": {
+        "nombreEmpresa": { "type": "string", "description": "Razón social del comercio" },
+        "rif": { "type": "string", "description": "RIF o identificación fiscal" },
+        "direccion": { "type": "string", "description": "Dirección fiscal principal" },
+        "telefono": { "type": "string", "description": "Teléfono de contacto comercial" },
+        "tasaCambio": { "type": "number", "description": "Tasa oficial USD a Bolívares" },
+        "fechaActualizacionTasa": { "type": "string", "description": "Fecha de última actualización de tasa" }
+      },
+      "required": ["nombreEmpresa", "rif", "tasaCambio"]
+    },
+    "TiendaConfig": {
+      "title": "TiendaConfig",
+      "description": "Ajustes de la tienda digital, métodos de pago móvil y catálogo",
+      "type": "object",
+      "properties": {
+        "whatsappContacto": { "type": "string", "description": "WhatsApp para recepción de pedidos" },
+        "pagoMovilBanco": { "type": "string", "description": "Banco para Pago Móvil" },
+        "pagoMovilTelefono": { "type": "string", "description": "Teléfono afiliado a Pago Móvil" },
+        "pagoMovilCedula": { "type": "string", "description": "Cédula o RIF para Pago Móvil" },
+        "costoDeliveryBase": { "type": "number", "description": "Costo base del delivery en USD" },
+        "montoMinimoEnvioGratis": { "type": "number", "description": "Monto mínimo para delivery gratis" },
+        "bannerPromo": { "type": "string", "description": "Texto del banner promocional" }
+      }
+    },
+    "Venta": {
+      "title": "Venta",
+      "description": "Registro de factura o venta generada en el sistema POS",
+      "type": "object",
+      "properties": {
+        "id": { "type": "number", "description": "ID numérico de la venta" },
+        "numeroFactura": { "type": "string", "description": "Número de control fiscal o factura" },
+        "fecha": { "type": "string", "description": "Fecha de la transacción" },
+        "sucursalId": { "type": "number", "description": "ID de sucursal donde se facturó" },
+        "usuarioId": { "type": "number", "description": "ID del cajero u operador" },
+        "total": { "type": "number", "description": "Total cobrado en USD" },
+        "totalBs": { "type": "number", "description": "Total cobrado en Bolívares" },
+        "metodoPago": { "type": "string", "description": "Método de pago" }
+      },
+      "required": ["id", "numeroFactura", "fecha", "total"]
+    }
+  },
+  "firestore": {
+    "/productos/{productoId}": {
+      "schema": "Producto",
+      "description": "Colección de productos del catálogo de la tienda y POS"
+    },
+    "/pedidos_online/{pedidoId}": {
+      "schema": "PedidoOnline",
+      "description": "Pedidos en línea generados por los clientes en tiempo real"
+    },
+    "/empresa_config/{configId}": {
+      "schema": "EmpresaConfig",
+      "description": "Configuración de la empresa y tasa oficial del día"
+    },
+    "/tienda_config/{configId}": {
+      "schema": "TiendaConfig",
+      "description": "Configuración de la tienda online (pago móvil, delivery, etc.)"
+    },
+    "/ventas/{ventaId}": {
+      "schema": "Venta",
+      "description": "Historial de facturas y ventas realizadas en el POS"
+    }
+  }
+}
