@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Proveedor, EmpresaConfig } from '../types';
 import { formatUSD, formatBs } from '../lib/currency';
+import { validateVenezuelanFiscalId, validateVenezuelanPhone, sanitizeText } from '../lib/validations';
 
 interface ProveedoresManagerProps {
   proveedores: Proveedor[];
@@ -82,39 +83,62 @@ export const ProveedoresManager: React.FC<ProveedoresManagerProps> = ({
       return;
     }
 
+    // Fiscal ID validation (J-, G-, V-, E-)
+    const fiscalRes = validateVenezuelanFiscalId(rif);
+    if (!fiscalRes.isValid) {
+      setFormError(fiscalRes.error || 'Número de RIF inválido.');
+      return;
+    }
+    const cleanRif = fiscalRes.formatted;
+
+    // Phone validation
+    let cleanPhone = telefono.trim();
+    if (cleanPhone) {
+      const phoneRes = validateVenezuelanPhone(cleanPhone);
+      if (!phoneRes.isValid) {
+        setFormError(phoneRes.error || 'Número de teléfono inválido.');
+        return;
+      }
+      cleanPhone = phoneRes.formatted;
+    }
+
     // Check duplicate RIF
     const duplicate = proveedores.find(
       (p) =>
-        p.rif.trim().toUpperCase() === rif.trim().toUpperCase() &&
+        p.rif.trim().toUpperCase() === cleanRif.toUpperCase() &&
         (!editingProv || p.id !== editingProv.id)
     );
     if (duplicate) {
-      setFormError(`Ya existe un proveedor registrado con el RIF ${rif.trim().toUpperCase()} (${duplicate.nombre}).`);
+      setFormError(`Ya existe un proveedor registrado con el RIF ${cleanRif} (${duplicate.nombre}).`);
       return;
     }
+
+    const cleanNombre = sanitizeText(nombre, 120);
+    const cleanContacto = sanitizeText(contacto, 80);
+    const cleanDireccion = sanitizeText(direccion, 200);
 
     if (editingProv) {
       onUpdateProveedor({
         ...editingProv,
-        nombre: nombre.trim(),
-        rif: rif.trim().toUpperCase(),
-        contacto: contacto.trim(),
-        telefono: telefono.trim(),
+        nombre: cleanNombre,
+        rif: cleanRif,
+        contacto: cleanContacto,
+        telefono: cleanPhone,
         email: email.trim(),
-        direccion: direccion.trim(),
+        direccion: cleanDireccion,
       });
-      setFeedbackMsg({ type: 'success', text: `Proveedor "${nombre.trim()}" actualizado exitosamente.` });
+      setFeedbackMsg({ type: 'success', text: `Proveedor "${cleanNombre}" actualizado exitosamente.` });
     } else {
       onAddProveedor({
-        nombre: nombre.trim(),
-        rif: rif.trim().toUpperCase(),
-        contacto: contacto.trim(),
-        telefono: telefono.trim(),
+        nombre: cleanNombre,
+        rif: cleanRif,
+        contacto: cleanContacto,
+        telefono: cleanPhone,
         email: email.trim(),
-        direccion: direccion.trim(),
+        direccion: cleanDireccion,
         saldoPendiente: 0,
       });
-      setFeedbackMsg({ type: 'success', text: `Proveedor "${nombre.trim()}" registrado exitosamente.` });
+      setFeedbackMsg({ type: 'success', text: `Proveedor "${cleanNombre}" registrado exitosamente.` });
     }
 
     setShowModal(false);

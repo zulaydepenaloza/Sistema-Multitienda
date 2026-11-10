@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { Cliente, EmpresaConfig } from '../types';
 import { formatUSD, formatBs } from '../lib/currency';
+import { validateVenezuelanFiscalId, validateVenezuelanPhone, validatePositiveAmount, sanitizeText } from '../lib/validations';
 
 interface ClientesManagerProps {
   clientes: Cliente[];
@@ -81,40 +82,69 @@ export const ClientesManager: React.FC<ClientesManagerProps> = ({
       return;
     }
 
+    // Fiscal ID validation (V-, E-, J-, G-, P-)
+    const fiscalRes = validateVenezuelanFiscalId(rifCedula);
+    if (!fiscalRes.isValid) {
+      setFormError(fiscalRes.error || 'Número de RIF o Cédula inválido.');
+      return;
+    }
+    const cleanFiscalId = fiscalRes.formatted;
+
+    // Phone validation
+    let cleanPhone = telefono.trim();
+    if (cleanPhone) {
+      const phoneRes = validateVenezuelanPhone(cleanPhone);
+      if (!phoneRes.isValid) {
+        setFormError(phoneRes.error || 'Número de teléfono inválido.');
+        return;
+      }
+      cleanPhone = phoneRes.formatted;
+    }
+
+    // Credit limit validation (>= 0)
+    const credRes = validatePositiveAmount(limiteCredito, 'El límite de crédito', true);
+    if (!credRes.isValid) {
+      setFormError(credRes.error || 'El límite de crédito debe ser mayor o igual a 0.');
+      return;
+    }
+
     // Check duplicate RIF/Cedula
     const duplicate = clientes.find(
       (c) =>
-        c.rif_cedula.trim().toUpperCase() === rifCedula.trim().toUpperCase() &&
+        c.rif_cedula.trim().toUpperCase() === cleanFiscalId.toUpperCase() &&
         (!editingCliente || c.id !== editingCliente.id)
     );
     if (duplicate) {
-      setFormError(`Ya existe un cliente registrado con el documento ${rifCedula.trim().toUpperCase()} (${duplicate.nombre}).`);
+      setFormError(`Ya existe un cliente registrado con el documento ${cleanFiscalId} (${duplicate.nombre}).`);
       return;
     }
+
+    const cleanNombre = sanitizeText(nombre, 120);
+    const cleanDireccion = sanitizeText(direccion, 200);
 
     if (editingCliente) {
       onUpdateCliente({
         ...editingCliente,
-        nombre: nombre.trim(),
-        rif_cedula: rifCedula.trim().toUpperCase(),
-        telefono: telefono.trim(),
+        nombre: cleanNombre,
+        rif_cedula: cleanFiscalId,
+        telefono: cleanPhone,
         email: email.trim(),
-        direccion: direccion.trim(),
-        limiteCredito: Number(limiteCredito) || 0,
+        direccion: cleanDireccion,
+        limiteCredito: credRes.value,
       });
-      setFeedbackMsg({ type: 'success', text: `Cliente "${nombre.trim()}" actualizado correctamente.` });
+      setFeedbackMsg({ type: 'success', text: `Cliente "${cleanNombre}" actualizado correctamente.` });
     } else {
       onAddCliente({
-        nombre: nombre.trim(),
-        rif_cedula: rifCedula.trim().toUpperCase(),
-        telefono: telefono.trim(),
+        nombre: cleanNombre,
+        rif_cedula: cleanFiscalId,
+        telefono: cleanPhone,
         email: email.trim(),
-        direccion: direccion.trim(),
-        limiteCredito: Number(limiteCredito) || 0,
+        direccion: cleanDireccion,
+        limiteCredito: credRes.value,
         saldoPendiente: 0,
         fechaRegistro: new Date().toISOString().split('T')[0],
       });
-      setFeedbackMsg({ type: 'success', text: `Cliente "${nombre.trim()}" registrado exitosamente.` });
+      setFeedbackMsg({ type: 'success', text: `Cliente "${cleanNombre}" registrado exitosamente.` });
     }
 
     setShowModal(false);

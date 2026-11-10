@@ -48,11 +48,12 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
   // Label appearance & configuration
   const [labelFormat, setLabelFormat] = useState<TicketLabelFormat>('standar');
   const [showBarcode, setShowBarcode] = useState<boolean>(true);
-  const [showBsPrice, setShowBsPrice] = useState<boolean>(true);
+  const [showBsPrice, setShowBsPrice] = useState<boolean>(false); // Ocultar Bs por defecto
   const [showUsdPrice, setShowUsdPrice] = useState<boolean>(true);
   const [showCompanyName, setShowCompanyName] = useState<boolean>(true);
   const [showCategory, setShowCategory] = useState<boolean>(true);
   const [showDate, setShowDate] = useState<boolean>(true);
+  const [tagDate, setTagDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
   const [customFooterNote, setCustomFooterNote] = useState<string>('Precio sujeto a cambio');
 
   // Update selection if preselectedProduct changes when modal opens
@@ -123,11 +124,14 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
     return items;
   }, [selectedIds, quantities, productos]);
 
-  const currentDateStr = new Date().toLocaleDateString('es-VE', {
-    day: '2-digit',
-    month: '2-digit',
-    year: '2-digit',
-  });
+  const formattedDateStr = useMemo(() => {
+    if (!tagDate) return '';
+    const parts = tagDate.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    }
+    return tagDate;
+  }, [tagDate]);
 
   const handlePrint = () => {
     window.print();
@@ -302,15 +306,25 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                   <span>Categoría</span>
                 </label>
 
-                <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showDate}
-                    onChange={e => setShowDate(e.target.checked)}
-                    className="rounded border-slate-700 bg-slate-800 text-emerald-500 focus:ring-0"
-                  />
-                  <span>Fecha de Emisión</span>
-                </label>
+                <div className="flex items-center gap-1.5 col-span-2">
+                  <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      checked={showDate}
+                      onChange={e => setShowDate(e.target.checked)}
+                      className="rounded border-slate-700 bg-slate-800 text-emerald-500 focus:ring-0"
+                    />
+                    <span>Fecha visible en etiqueta:</span>
+                  </label>
+                  {showDate && (
+                    <input
+                      type="date"
+                      value={tagDate}
+                      onChange={e => setTagDate(e.target.value)}
+                      className="bg-slate-900 border border-slate-700 text-white text-[11px] px-2 py-0.5 rounded-lg font-mono focus:border-amber-500 focus:outline-none"
+                    />
+                  )}
+                </div>
               </div>
             </div>
 
@@ -505,18 +519,20 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                           </h4>
                         </div>
 
-                        {/* Prices Block (Increased Height & Bigger Typography) */}
+                        {/* Prices Block (Prominent USD Price) */}
                         <div
-                          className={`bg-amber-50/90 rounded-lg border border-amber-300 my-1 flex items-center justify-between shadow-xs ${
+                          className={`bg-amber-50/90 rounded-lg border border-amber-300 my-1 flex items-center shadow-xs ${
+                            !showBsPrice ? 'justify-center text-center' : 'justify-between'
+                          } ${
                             labelFormat === 'estanteria_grande'
-                              ? 'py-3.5 px-4 min-h-[72px]'
+                              ? 'py-3.5 px-4 min-h-[76px]'
                               : labelFormat === 'compacto'
-                              ? 'py-1.5 px-2 min-h-[44px]'
-                              : 'py-2.5 px-3 min-h-[56px]'
+                              ? 'py-1.5 px-2 min-h-[46px]'
+                              : 'py-2 px-3 min-h-[62px]'
                           }`}
                         >
                           {showBsPrice && (
-                            <div className="flex flex-col justify-center">
+                            <div className="flex flex-col justify-center text-left">
                               <span className="text-[8px] font-black text-slate-500 uppercase tracking-wider leading-none mb-1">
                                 Precio Bs:
                               </span>
@@ -526,8 +542,6 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                                     ? 'text-3xl'
                                     : labelFormat === 'compacto'
                                     ? 'text-sm'
-                                    : !showUsdPrice
-                                    ? 'text-2xl sm:text-3xl'
                                     : 'text-lg sm:text-xl'
                                 }`}
                               >
@@ -539,21 +553,21 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                           {showUsdPrice && (
                             <div
                               className={`flex flex-col justify-center ${
-                                showBsPrice ? 'text-right items-end' : 'text-left items-start'
+                                !showBsPrice
+                                  ? 'items-center text-center w-full'
+                                  : 'text-right items-end'
                               }`}
                             >
-                              <span className="text-[8px] font-black text-emerald-800 uppercase tracking-wider leading-none mb-1">
-                                Ref $:
+                              <span className="text-[9px] font-black text-emerald-800 uppercase tracking-wider leading-none mb-1">
+                                {!showBsPrice ? 'PRECIO REF. $:' : 'Ref $: '}
                               </span>
                               <span
                                 className={`font-black text-emerald-700 font-mono tracking-tight leading-none ${
                                   labelFormat === 'estanteria_grande'
-                                    ? 'text-3xl'
+                                    ? (!showBsPrice ? 'text-4xl sm:text-5xl' : 'text-3xl')
                                     : labelFormat === 'compacto'
-                                    ? 'text-sm'
-                                    : !showBsPrice
-                                    ? 'text-2xl sm:text-3xl'
-                                    : 'text-lg sm:text-xl'
+                                    ? (!showBsPrice ? 'text-xl' : 'text-sm')
+                                    : (!showBsPrice ? 'text-3xl sm:text-4xl' : 'text-xl sm:text-2xl')
                                 }`}
                               >
                                 ${prod.precio.toFixed(2)}
@@ -563,28 +577,29 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                         </div>
 
                         {/* Footer: Barcode representation & dates */}
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-[9px] text-slate-500 font-mono mt-auto">
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-[9px] text-slate-500 font-mono mt-auto gap-1">
                           {showBarcode ? (
-                            <div className="flex items-center gap-2 max-w-[70%]">
+                            <div className="flex items-center gap-1.5 min-w-0 max-w-[65%]">
                               <BarcodeSvg
                                 value={prod.codigo_barras}
-                                height={labelFormat === 'compacto' ? 20 : 28}
+                                height={labelFormat === 'compacto' ? 18 : 26}
                                 showText={false}
                                 color="#0f172a"
-                                className="w-24 sm:w-28 shrink-0"
+                                className="w-20 sm:w-24 shrink-0"
                               />
                               <span className="font-bold text-slate-900 text-[10px] tracking-wider truncate">
                                 {prod.codigo_barras}
                               </span>
                             </div>
                           ) : (
-                            <span className="font-bold text-slate-700">{prod.codigo_barras}</span>
+                            <span className="font-bold text-slate-700 truncate">{prod.codigo_barras}</span>
                           )}
 
                           {showDate && (
-                            <span className="text-[8px] text-slate-400">
-                              {currentDateStr}
-                            </span>
+                            <div className="flex items-center gap-1 bg-slate-100 text-slate-900 px-1.5 py-0.5 rounded border border-slate-300 font-bold text-[9px] shrink-0 font-sans shadow-xs">
+                              <span>📅</span>
+                              <span>{formattedDateStr}</span>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -693,16 +708,17 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                 </div>
               </div>
 
-              {/* Price Banner (Expanded Height & Prominence) */}
+              {/* Price Banner (Enlarged USD price and clean layout) */}
               <div style={{
                 backgroundColor: '#fffbeb',
                 border: '1.5px solid #fcd34d',
                 borderRadius: '6px',
-                padding: labelFormat === 'estanteria_grande' ? '10px 14px' : labelFormat === 'compacto' ? '5px 8px' : '8px 12px',
-                minHeight: labelFormat === 'estanteria_grande' ? '68px' : labelFormat === 'compacto' ? '42px' : '54px',
+                padding: labelFormat === 'estanteria_grande' ? '12px 14px' : labelFormat === 'compacto' ? '5px 8px' : '8px 12px',
+                minHeight: labelFormat === 'estanteria_grande' ? '74px' : labelFormat === 'compacto' ? '44px' : '60px',
                 display: 'flex',
-                justifyContent: 'space-between',
+                justifyContent: !showBsPrice ? 'center' : 'space-between',
                 alignItems: 'center',
+                textAlign: !showBsPrice ? 'center' : 'left',
                 margin: '4px 0'
               }}>
                 {showBsPrice && (
@@ -711,7 +727,7 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                       Precio Bs:
                     </span>
                     <span style={{
-                      fontSize: labelFormat === 'estanteria_grande' ? '28px' : labelFormat === 'compacto' ? '15px' : !showUsdPrice ? '26px' : '20px',
+                      fontSize: labelFormat === 'estanteria_grande' ? '28px' : labelFormat === 'compacto' ? '15px' : '20px',
                       fontWeight: 900,
                       fontFamily: 'monospace',
                       lineHeight: 1,
@@ -727,18 +743,24 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'center',
-                    textAlign: showBsPrice ? 'right' : 'left',
-                    alignItems: showBsPrice ? 'flex-end' : 'flex-start'
+                    textAlign: !showBsPrice ? 'center' : (showBsPrice ? 'right' : 'left'),
+                    alignItems: !showBsPrice ? 'center' : (showBsPrice ? 'flex-end' : 'flex-start'),
+                    width: !showBsPrice ? '100%' : 'auto'
                   }}>
-                    <span style={{ fontSize: '8px', fontWeight: 900, color: '#047857', textTransform: 'uppercase', display: 'block', marginBottom: '2px', lineHeight: 1 }}>
-                      Ref $:
+                    <span style={{ fontSize: '9px', fontWeight: 900, color: '#047857', textTransform: 'uppercase', display: 'block', marginBottom: '2px', lineHeight: 1 }}>
+                      {!showBsPrice ? 'PRECIO REF. $:' : 'Ref $: '}
                     </span>
                     <span style={{
-                      fontSize: labelFormat === 'estanteria_grande' ? '28px' : labelFormat === 'compacto' ? '15px' : !showBsPrice ? '26px' : '20px',
+                      fontSize: labelFormat === 'estanteria_grande' 
+                        ? (!showBsPrice ? '46px' : '28px')
+                        : labelFormat === 'compacto' 
+                        ? (!showBsPrice ? '22px' : '15px')
+                        : (!showBsPrice ? '36px' : '22px'),
                       fontWeight: 900,
                       fontFamily: 'monospace',
                       color: '#047857',
-                      lineHeight: 1
+                      lineHeight: 1,
+                      letterSpacing: '-0.02em'
                     }}>
                       ${prod.precio.toFixed(2)}
                     </span>
@@ -747,15 +769,15 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
               </div>
 
               {/* Footer */}
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '4px', fontSize: '9px', fontFamily: 'monospace' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '4px', fontSize: '9px', fontFamily: 'monospace', gap: '4px' }}>
                 {showBarcode ? (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', maxWidth: '75%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', maxWidth: '65%' }}>
                     <BarcodeSvg
                       value={prod.codigo_barras}
-                      height={labelFormat === 'compacto' ? 18 : 26}
+                      height={labelFormat === 'compacto' ? 16 : 24}
                       showText={false}
                       color="#000000"
-                      className="w-24 shrink-0"
+                      className="w-20 shrink-0"
                     />
                     <span style={{ fontWeight: 800, fontSize: '10px', letterSpacing: '0.05em' }}>
                       {prod.codigo_barras}
@@ -766,9 +788,22 @@ export const PriceTagsPrintModal: React.FC<PriceTagsPrintModalProps> = ({
                 )}
 
                 {showDate && (
-                  <span style={{ fontSize: '8px', color: '#64748b' }}>
-                    {currentDateStr}
-                  </span>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    fontSize: '9.5px',
+                    fontWeight: 800,
+                    color: '#0f172a',
+                    backgroundColor: '#f1f5f9',
+                    border: '1px solid #cbd5e1',
+                    padding: '2px 5px',
+                    borderRadius: '3px',
+                    whiteSpace: 'nowrap'
+                  }}>
+                    <span>📅</span>
+                    <span>{formattedDateStr}</span>
+                  </div>
                 )}
               </div>
             </div>

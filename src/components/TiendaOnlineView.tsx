@@ -72,6 +72,7 @@ interface TiendaOnlineViewProps {
   onCrearPedido: (pedido: Omit<PedidoOnline, 'id' | 'numeroPedido' | 'fecha' | 'creadoEn' | 'estado'>) => PedidoOnline;
   onVolverAlPos: () => void;
   onActualizarTiendaConfig?: (config: TiendaConfig) => void;
+  onOpenStoreShare?: () => void;
 }
 
 interface CartItem {
@@ -103,6 +104,7 @@ export const TiendaOnlineView: React.FC<TiendaOnlineViewProps> = ({
   onCrearPedido,
   onVolverAlPos,
   onActualizarTiendaConfig,
+  onOpenStoreShare,
 }) => {
   // Determine if this is an external public customer view vs an internal POS merchant preview.
   // Customers NEVER see 'Volver al POS' or 'Modo Vista Previa' banners.
@@ -629,15 +631,28 @@ export const TiendaOnlineView: React.FC<TiendaOnlineViewProps> = ({
               )}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onVolverAlPos}
-            className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-md shadow-emerald-950/80 cursor-pointer transition-all hover:scale-102"
-            title="Haga clic para regresar a la facturación y administración"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            <span>Volver al Sistema Principal (POS)</span>
-          </button>
+          <div className="flex items-center gap-2">
+            {onOpenStoreShare && (
+              <button
+                type="button"
+                onClick={onOpenStoreShare}
+                className="px-3.5 py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 font-extrabold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-teal-950/80 cursor-pointer transition-all hover:scale-102"
+                title="Obtener y compartir el link de la tienda online para clientes"
+              >
+                <Share2 className="w-4 h-4 stroke-[2.5]" />
+                <span>Link Tienda Clientes</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onVolverAlPos}
+              className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-md shadow-emerald-950/80 cursor-pointer transition-all hover:scale-102"
+              title="Haga clic para regresar a la facturación y administración"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Volver al Sistema Principal (POS)</span>
+            </button>
+          </div>
         </div>
       )}
 

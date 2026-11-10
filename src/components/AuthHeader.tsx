@@ -165,33 +165,6 @@ export const AuthHeader: React.FC<AuthHeaderProps> = ({
               <span>Iniciar Sesión con PIN</span>
             </button>
           )}
-
-          {currentUser?.rol === 'admin' && (
-            <button
-              type="button"
-              onClick={() => {
-                if (onOpenHtmlModal) {
-                  onOpenHtmlModal();
-                } else {
-                  downloadStandaloneHtmlFile();
-                }
-              }}
-              className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 text-[11px] font-bold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm hover:scale-102"
-              title="Descargar archivo pos_multisucursal.html (Acceso exclusivo Gerente General)"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-400 stroke-[2.5]" />
-              <span>Descargar .HTML</span>
-            </button>
-          )}
-
-          <button
-            onClick={() => setShowPinHelpModal(true)}
-            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 text-[11px] flex items-center gap-1 cursor-pointer"
-            title="Ayuda / Consultar listado de PINs de prueba"
-          >
-            <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
-            <span>Guía de PINs</span>
-          </button>
         </div>
       </div>
 

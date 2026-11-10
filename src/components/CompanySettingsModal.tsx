@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { EmpresaConfig, Usuario } from '../types';
 import { formatBs, formatUSD, DEFAULT_EMPRESA_CONFIG } from '../lib/currency';
+import { validateVenezuelanFiscalId, validateVenezuelanPhone, sanitizeText } from '../lib/validations';
 
 interface CompanySettingsModalProps {
   isOpen: boolean;
@@ -48,11 +49,13 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
   const [formData, setFormData] = useState<EmpresaConfig>({ ...DEFAULT_EMPRESA_CONFIG, ...activeConfig });
   const [activeTab, setActiveTab] = useState<'empresa' | 'tiendas' | 'tasa'>('empresa');
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (isOpen) {
       const freshConfig = empresaConfig || config || DEFAULT_EMPRESA_CONFIG;
       setFormData({ ...DEFAULT_EMPRESA_CONFIG, ...freshConfig });
+      setValidationError(null);
     }
   }, [isOpen, empresaConfig, config]);
 
@@ -62,9 +65,43 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setValidationError(null);
+
+    // Validate RIF if provided
+    let cleanRif = formData.rif?.trim() || '';
+    if (cleanRif) {
+      const rifRes = validateVenezuelanFiscalId(cleanRif);
+      if (!rifRes.isValid) {
+        setValidationError(rifRes.error || 'Número de RIF fiscal de la empresa inválido.');
+        setActiveTab('empresa');
+        return;
+      }
+      cleanRif = rifRes.formatted;
+    }
+
+    // Validate Phone if provided
+    let cleanPhone = formData.telefono?.trim() || '';
+    if (cleanPhone) {
+      const phoneRes = validateVenezuelanPhone(cleanPhone);
+      if (!phoneRes.isValid) {
+        setValidationError(phoneRes.error || 'Número de teléfono de la empresa inválido.');
+        setActiveTab('empresa');
+        return;
+      }
+      cleanPhone = phoneRes.formatted;
+    }
+
+    const payloadToSave: EmpresaConfig = {
+      ...formData,
+      nombreEmpresa: sanitizeText(formData.nombreEmpresa, 100),
+      rif: cleanRif,
+      direccionFiscal: sanitizeText(formData.direccionFiscal, 250),
+      telefono: cleanPhone,
+    };
+
     const saveFn = onSaveConfig || onSave;
     if (saveFn) {
-      saveFn(formData);
+      saveFn(payloadToSave);
     }
     setSavedSuccess(true);
     setTimeout(() => {
@@ -147,6 +184,13 @@ export const CompanySettingsModal: React.FC<CompanySettingsModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="space-y-5">
+          {validationError && (
+            <div className="p-3 bg-rose-500/15 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2">
+              <span className="font-bold">⚠️ Atención:</span>
+              <span>{validationError}</span>
+            </div>
+          )}
+
           {/* TAB 1: DATOS FISCALES */}
           {activeTab === 'empresa' && (
             <div className="space-y-4">

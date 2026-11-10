@@ -313,14 +313,53 @@ export async function deleteProductFromFirestore(prodId: number): Promise<boolea
 }
 
 /**
- * Save inventario stock to Firestore
+ * Save inventario stock to Firestore with Branch Isolation (Separación por Sucursal)
+ * Saves isolated documents per branch (`inventario/sucursal_${id}`) to prevent
+ * cross-branch overwrite and document size limit issues.
  */
-export async function saveInventarioToFirestore(inventario: InventarioItem[]): Promise<boolean> {
+export async function saveInventarioToFirestore(
+  inventario: InventarioItem[],
+  targetSucursalId?: number
+): Promise<boolean> {
   try {
-    await setDoc(doc(db, 'inventario', 'main'), {
-      items: inventario,
-      updatedAt: new Date().toISOString(),
-    }, { merge: true });
+    // Group inventory by branch (sucursal)
+    const bySucursal = new Map<number, InventarioItem[]>();
+    for (const item of inventario) {
+      const list = bySucursal.get(item.sucursal_id) || [];
+      list.push(item);
+      bySucursal.set(item.sucursal_id, list);
+    }
+
+    // Save each branch's stock in its own isolated document
+    const batch = writeBatch(db);
+    const sucursalesToSave = targetSucursalId ? [targetSucursalId] : Array.from(bySucursal.keys());
+
+    for (const sId of sucursalesToSave) {
+      const branchItems = bySucursal.get(sId) || [];
+      const branchDocRef = doc(db, 'inventario', `sucursal_${sId}`);
+      batch.set(
+        branchDocRef,
+        {
+          sucursalId: sId,
+          items: branchItems,
+          totalArticulos: branchItems.length,
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    }
+
+    // Keep legacy main doc updated for backwards compatibility
+    batch.set(
+      doc(db, 'inventario', 'main'),
+      {
+        items: inventario,
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
     return true;
   } catch (err) {
     console.error('Error saving inventario to Firestore:', err);
@@ -329,13 +368,33 @@ export async function saveInventarioToFirestore(inventario: InventarioItem[]): P
 }
 
 /**
- * Fetch inventario from Firestore
+ * Fetch consolidated inventario from Firestore with multi-branch support
  */
 export async function fetchInventarioFromFirestore(): Promise<InventarioItem[] | null> {
   try {
-    const snap = await getDoc(doc(db, 'inventario', 'main'));
-    if (snap.exists() && Array.isArray(snap.data().items)) {
-      return snap.data().items as InventarioItem[];
+    const invColSnap = await getDocs(collection(db, 'inventario'));
+    if (!invColSnap.empty) {
+      const consolidatedMap = new Map<string, InventarioItem>();
+      let foundBranchDocs = false;
+
+      invColSnap.forEach((d) => {
+        if (d.id.startsWith('sucursal_') && Array.isArray(d.data().items)) {
+          foundBranchDocs = true;
+          (d.data().items as InventarioItem[]).forEach((item) => {
+            consolidatedMap.set(`${item.sucursal_id}_${item.producto_id}`, item);
+          });
+        }
+      });
+
+      if (foundBranchDocs && consolidatedMap.size > 0) {
+        return Array.from(consolidatedMap.values());
+      }
+
+      // Fallback to main document
+      const mainDoc = invColSnap.docs.find((d) => d.id === 'main');
+      if (mainDoc && Array.isArray(mainDoc.data().items)) {
+        return mainDoc.data().items as InventarioItem[];
+      }
     }
   } catch (err) {
     console.warn('Error fetching inventario from Firestore:', err);
@@ -345,8 +404,8 @@ export async function fetchInventarioFromFirestore(): Promise<InventarioItem[] |
 
 /**
  * Synchronize full local product catalog and stock to Firestore
- * Overwrites Firestore products so it matches the exact current local catalog,
- * deleting any old/orphaned sample products from Firestore.
+ * Safely upserts products and sucursales without destructive deletes
+ * that could eliminate products registered in other branches.
  */
 export async function syncAllToFirestore({
   productos,
@@ -362,55 +421,52 @@ export async function syncAllToFirestore({
   inventario: InventarioItem[];
 }): Promise<{ success: boolean; count: number; deletedCount: number; error?: string }> {
   try {
-    // 1. Sync Empresa & Tienda config
+    // 1. Sync Empresa & Tienda config and branch-isolated inventory
     await saveEmpresaConfigToFirestore(empresaConfig);
     await saveTiendaConfigToFirestore(tiendaConfig);
     await saveInventarioToFirestore(inventario);
 
-    // 2. Fetch existing products in Firestore to find items to delete
-    const existingSnap = await getDocs(collection(db, 'productos'));
-    const localIds = new Set(productos.map((p) => String(p.id)));
-
-    const batch = writeBatch(db);
+    // 2. Safe chunked batch upsert of local products (max 400 operations per batch to comply with Firestore's 500-write limit)
+    const BATCH_LIMIT = 400;
     let count = 0;
-    let deletedCount = 0;
 
-    // Delete products in Firestore that no longer exist locally (e.g. old sample products 2..8)
-    existingSnap.forEach((d) => {
-      if (!localIds.has(d.id)) {
-        batch.delete(d.ref);
-        deletedCount++;
+    for (let i = 0; i < productos.length; i += BATCH_LIMIT) {
+      const slice = productos.slice(i, i + BATCH_LIMIT);
+      const batch = writeBatch(db);
+
+      for (const prod of slice) {
+        const prodRef = doc(db, 'productos', String(prod.id));
+        const cleanProd: Record<string, any> = {
+          id: prod.id,
+          nombre: prod.nombre || '',
+          precio: Number(prod.precio) || 0,
+          codigo_barras: prod.codigo_barras || '',
+          costo: prod.costo !== undefined ? Number(prod.costo) : 0,
+          unidad_medida: prod.unidad_medida || 'UND',
+          exento_iva: Boolean(prod.exento_iva),
+          categoria: prod.categoria || 'General',
+          descripcion: prod.descripcion || '',
+          imagen: prod.imagen || '',
+          destacadoTienda: prod.destacadoTienda !== undefined ? Boolean(prod.destacadoTienda) : true,
+        };
+        batch.set(prodRef, cleanProd, { merge: true });
+        count++;
       }
-    });
 
-    // Upsert current local products
-    for (const prod of productos) {
-      const prodRef = doc(db, 'productos', String(prod.id));
-      const cleanProd: Record<string, any> = {
-        id: prod.id,
-        nombre: prod.nombre || '',
-        precio: Number(prod.precio) || 0,
-        codigo_barras: prod.codigo_barras || '',
-        costo: prod.costo !== undefined ? Number(prod.costo) : 0,
-        unidad_medida: prod.unidad_medida || 'UND',
-        exento_iva: Boolean(prod.exento_iva),
-        categoria: prod.categoria || 'General',
-        descripcion: prod.descripcion || '',
-        imagen: prod.imagen || '',
-        destacadoTienda: prod.destacadoTienda !== undefined ? Boolean(prod.destacadoTienda) : true,
-      };
-      batch.set(prodRef, cleanProd, { merge: true });
-      count++;
+      await batch.commit();
     }
 
-    // 3. Batch write sucursales
-    for (const suc of sucursales) {
-      const sucRef = doc(db, 'sucursales', String(suc.id));
-      batch.set(sucRef, suc, { merge: true });
+    // 3. Batch write sucursales in dedicated batch
+    if (sucursales.length > 0) {
+      const sucBatch = writeBatch(db);
+      for (const suc of sucursales) {
+        const sucRef = doc(db, 'sucursales', String(suc.id));
+        sucBatch.set(sucRef, suc, { merge: true });
+      }
+      await sucBatch.commit();
     }
 
-    await batch.commit();
-    return { success: true, count, deletedCount };
+    return { success: true, count, deletedCount: 0 };
   } catch (err: any) {
     console.error('Error syncing all to Firestore:', err);
     return { success: false, count: 0, deletedCount: 0, error: err?.message || String(err) };

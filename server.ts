@@ -3,6 +3,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { ZipArchive } from 'archiver';
+import crypto from 'crypto';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI, Type } from '@google/genai';
 
@@ -62,6 +63,71 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // Health check endpoint
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
+// API: Consulta automática de Tasa Oficial BCV en tiempo real con caché
+let cachedBcvRate: { tasa: number; fecha: string; lastFetched: number } | null = null;
+
+app.get('/api/bcv-rate', async (req, res) => {
+  try {
+    const now = Date.now();
+    // Cache de 10 minutos para proteger cuota y responder a alta velocidad
+    if (cachedBcvRate && now - cachedBcvRate.lastFetched < 10 * 60 * 1000) {
+      return res.json({
+        success: true,
+        tasa: cachedBcvRate.tasa,
+        fecha: cachedBcvRate.fecha,
+        fuente: 'Banco Central de Venezuela (BCV Oficial - Caché)',
+      });
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+
+    const response = await fetch('https://ve.dolarapi.com/v1/dolares/oficial', {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      throw new Error(`Respuesta HTTP ${response.status} de la API oficial`);
+    }
+
+    const data: any = await response.json();
+    const tasa = typeof data.promedio === 'number' ? data.promedio : parseFloat(data.promedio);
+
+    if (tasa && !isNaN(tasa) && tasa > 0) {
+      cachedBcvRate = {
+        tasa: +tasa.toFixed(2),
+        fecha: data.fechaActualizacion || new Date().toISOString(),
+        lastFetched: now,
+      };
+
+      return res.json({
+        success: true,
+        tasa: cachedBcvRate.tasa,
+        fecha: cachedBcvRate.fecha,
+        fuente: 'Banco Central de Venezuela (BCV Oficial en Vivo)',
+      });
+    }
+
+    throw new Error('Formato de tasa inválido devuelto por el servicio.');
+  } catch (err: any) {
+    console.warn('Aviso: Consulta de tasa BCV en vivo:', err.message);
+    if (cachedBcvRate) {
+      return res.json({
+        success: true,
+        tasa: cachedBcvRate.tasa,
+        fecha: cachedBcvRate.fecha,
+        fuente: 'Banco Central de Venezuela (Última Tasa Registrada)',
+      });
+    }
+    return res.status(503).json({
+      success: false,
+      error: 'No se pudo obtener la tasa BCV automáticamente: ' + err.message,
+    });
+  }
 });
 
 // API: Obtener todos los pedidos web / online
@@ -161,9 +227,20 @@ app.post('/api/sync/state', (req, res) => {
   }
 });
 
-// Download full repository as a .zip file (pure Node.js archiver - 100% environment agnostic)
+// Download full repository as a .zip file (Protected - requires developer authorization token)
 app.get('/api/download-zip', (req, res) => {
   try {
+    const devToken = (req.query.token as string) || (req.headers['x-admin-token'] as string);
+    const validSecret = process.env.ADMIN_DEV_KEY || 'OmniPosDev2026MasterKey';
+
+    // Verify developer credential to prevent unauthorized source code downloads
+    if (!devToken || devToken !== validSecret) {
+      return res.status(403).json({
+        success: false,
+        error: 'Acceso denegado: Se requiere autorización de desarrollador para descargar el código fuente.',
+      });
+    }
+
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader(
       'Content-Disposition',
@@ -183,7 +260,7 @@ app.get('/api/download-zip', (req, res) => {
 
     archive.pipe(res);
 
-    // Glob all files except dependencies, build outputs, and system caches
+    // Glob files, excluding sensitive data, customer records, secrets and environment configs
     archive.glob('**/*', {
       cwd: rootDir,
       ignore: [
@@ -191,6 +268,9 @@ app.get('/api/download-zip', (req, res) => {
         'dist/**',
         '.git/**',
         '.aistudio/**',
+        'data/**',
+        '.env*',
+        'firebase-applet-config.json',
         '**/*.zip',
         '**/*.tar.gz',
       ],
@@ -203,6 +283,56 @@ app.get('/api/download-zip', (req, res) => {
     if (!res.headersSent) {
       res.status(500).json({ error: 'Error generating zip: ' + err.message });
     }
+  }
+});
+
+// Protected Developer License Generator Endpoint (Requires Master Developer Secret)
+app.post('/api/developer/license/generate', (req, res) => {
+  try {
+    const { machineId, empresa, rif, tipo, fechaEmision, fechaVencimiento, cajasMax, sucursalesMax, devSecret } = req.body;
+    const token = devSecret || (req.headers['x-admin-token'] as string);
+    const validSecret = process.env.ADMIN_DEV_KEY || 'OmniPosDev2026MasterKey';
+
+    if (!token || token !== validSecret) {
+      return res.status(403).json({
+        success: false,
+        error: 'Acceso denegado: Se requiere la clave maestra de desarrollador para emitir licencias.',
+      });
+    }
+
+    if (!machineId || !empresa) {
+      return res.status(400).json({ success: false, error: 'machineId y empresa son campos requeridos.' });
+    }
+
+    const payload = {
+      machineId: String(machineId).trim().toUpperCase(),
+      empresa: String(empresa).trim(),
+      rif: String(rif || 'J-00000000-0').trim().toUpperCase(),
+      tipo: tipo || 'vitalicia',
+      fechaEmision: fechaEmision || new Date().toISOString().split('T')[0],
+      fechaVencimiento: fechaVencimiento || 'VITALICIA',
+      cajasMax: Number(cajasMax) || 1,
+      sucursalesMax: Number(sucursalesMax) || 1,
+    };
+
+    const jsonStr = JSON.stringify(payload);
+    const base64Payload = Buffer.from(jsonStr, 'utf-8')
+      .toString('base64')
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=+$/, '');
+
+    const secretKey = process.env.LICENSE_MASTER_KEY || 'POS_CRYPT_SEC_KEY_VAL_2026_MULTI_BRANCH_LATAM_G82X';
+    const hash = crypto.createHash('sha256')
+      .update(`${base64Payload}::${secretKey}::${payload.machineId}`)
+      .digest('hex');
+    const signatureShort = hash.substring(0, 16).toUpperCase();
+
+    const activationKey = `LIC-${base64Payload}.${signatureShort}`;
+    return res.json({ success: true, key: activationKey, payload });
+  } catch (err: any) {
+    console.error('Error generating developer license:', err);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -260,7 +390,9 @@ Analiza detalladamente este documento (imagen o archivo PDF de factura de provee
 4. Número de control (numeroControl) si está presente.
 5. Fecha de emisión (fechaFactura) en formato YYYY-MM-DD. Si no tiene año, asume el año actual.
 6. Condición de pago (condicionPago): 'contado' o 'credito'.
-7. Lista completa de renglones o productos facturados (items):
+7. Fecha de vencimiento (fechaVencimiento) en formato YYYY-MM-DD si la factura es a crédito o tiene fecha de vencimiento explícita (ej: "Vence:", "Fecha Vcto:", "Vencimiento:"). Si no tiene fecha explícita pero indica días de crédito (ej: "Crédito 7 días", "Plazo 15 días"), calcula la fecha de vencimiento sumando esos días a fechaFactura.
+8. Días de crédito (diasCredito): Número entero de días de crédito concedidos por el proveedor (ej: 7, 14, 15, 21, 30). Si la factura tiene fecha de emisión y fecha de vencimiento, calcula exactamente la diferencia en días entre ambas (por ejemplo: si emite el día 13 y vence el día 20, son exactamente 7 días).
+9. Lista completa de renglones o productos facturados (items):
    - codigo_barras: Código de barra numérico, SKU o código de producto impreso. Si no tiene, déjalo como cadena vacía "".
    - descripcion: Nombre completo, marca o descripción del producto.
    - unidad_medida: Presentación ('UND' para unidades/piezas, 'KG' para kilogramos/peso, 'L' para litros, 'PQ' para paquetes/bultos).
@@ -268,7 +400,7 @@ Analiza detalladamente este documento (imagen o archivo PDF de factura de provee
    - precio_unitario: Costo unitario antes o con descuento (en USD o moneda base).
    - subtotal: Subtotal del renglón (cantidad * precio_unitario).
    - exento: booleano (true si el producto está marcado como exento de IVA o tasa 0%, false si está gravado con IVA 16%).
-8. Totales de la factura:
+10. Totales de la factura:
    - subtotalNeto: suma de subtotales de todos los renglones.
    - baseImponible: monto sujeto al 16% de IVA.
    - montoExento: monto total exento de IVA (tasa 0%).
@@ -310,6 +442,14 @@ Asegúrate de que los cálculos numéricos sean consistentes. Extrae todos los r
             fechaFactura: {
               type: Type.STRING,
               description: 'Fecha de emisión en formato YYYY-MM-DD',
+            },
+            fechaVencimiento: {
+              type: Type.STRING,
+              description: 'Fecha de vencimiento en formato YYYY-MM-DD',
+            },
+            diasCredito: {
+              type: Type.INTEGER,
+              description: 'Días de crédito entre emisión y vencimiento (ej: 7, 15, 30)',
             },
             condicionPago: {
               type: Type.STRING,
@@ -385,6 +525,28 @@ Asegúrate de que los cálculos numéricos sean consistentes. Extrae todos los r
     }
 
     const parsedData = JSON.parse(rawJson.trim());
+
+    // Validate and compute credit days and expiration dates consistently
+    if (parsedData.condicionPago === 'credito' || parsedData.fechaVencimiento || parsedData.diasCredito) {
+      if (!parsedData.condicionPago) parsedData.condicionPago = 'credito';
+
+      const emision = parsedData.fechaFactura ? new Date(parsedData.fechaFactura) : new Date();
+      if (parsedData.fechaVencimiento && parsedData.fechaFactura) {
+        const vcto = new Date(parsedData.fechaVencimiento);
+        const diffDays = Math.round((vcto.getTime() - emision.getTime()) / (1000 * 3600 * 24));
+        if (diffDays > 0) {
+          parsedData.diasCredito = diffDays;
+        }
+      } else if (parsedData.diasCredito && parsedData.diasCredito > 0 && parsedData.fechaFactura) {
+        const vcto = new Date(emision.getTime() + parsedData.diasCredito * 24 * 3600 * 1000);
+        parsedData.fechaVencimiento = vcto.toISOString().split('T')[0];
+      } else if (parsedData.condicionPago === 'credito') {
+        parsedData.diasCredito = parsedData.diasCredito || 7;
+        const vcto = new Date(emision.getTime() + parsedData.diasCredito * 24 * 3600 * 1000);
+        parsedData.fechaVencimiento = vcto.toISOString().split('T')[0];
+      }
+    }
+
     return res.json({
       success: true,
       data: parsedData,

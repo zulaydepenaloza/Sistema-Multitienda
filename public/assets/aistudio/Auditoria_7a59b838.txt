@@ -1,0 +1,124 @@
+﻿Informe preliminar de auditoría técnica
+Requiere correcciones antes de instalar
+Código fuente recibido
+Proyecto: Sistema POS & ERP Administrativo Multisucursal · Versión recibida: 8 de noviembre de 2026
+1. Hallazgos más importantes
+He encontrado problemas reales que debemos corregir. Algunos son especialmente delicados porque afectan directamente la protección de la información comercial.
+1. Seguridad de Firebase
+Crítico
+Las reglas de Firestore permiten leer y modificar información sin autenticación.
+El problema más grave está en esta regla:
+match /{document=**} {
+  allow read, write: if true;
+}
+Esto permite que cualquier persona con acceso a la base de datos pueda leer, modificar o eliminar documentos, independientemente de su usuario o sucursal.
+Además, las colecciones de productos, pedidos y configuración también tienen permisos demasiado abiertos.
+Corrección necesaria: diseñar reglas que exijan usuarios autenticados, permisos por rol y restricciones por sucursal.
+2. Autenticación de usuarios
+Crítico
+El proyecto utiliza un sistema de PIN local, pero no tiene implementada la autenticación de Firebase.
+Encontré tres deficiencias:
+    • Los usuarios y sus PIN están definidos en el código de demostración.
+    • La sesión inicial se asigna automáticamente al primer usuario de la lista.
+    • Los permisos se controlan principalmente desde la interfaz, no desde una autoridad segura del servidor.
+Esto significa que la protección de acceso no es suficiente para un sistema comercial real.
+Corrección necesaria: implementar Firebase Authentication y autorización real en el servidor y en Firestore.
+3. Protección de licencias
+Crítico
+Encontré un problema importante en src/lib/licensing.ts.
+La clave secreta utilizada para generar y validar licencias está escrita directamente en el código que se entrega al navegador.
+También encontré que App.tsx genera automáticamente una licencia vitalicia de desarrollador cuando no existe ninguna licencia almacenada.
+Esto debilita considerablemente el sistema de protección.
+Corrección necesaria:
+    • Trasladar la firma de licencias a un entorno controlado por el desarrollador.
+    • Eliminar la generación automática de licencias vitalicias.
+    • Implementar validación, revocación y límites de sucursales y cajas.
+    • Evitar que el cliente pueda fabricar licencias válidas.
+      4. Servidor y acceso a información
+      Crítico
+      En server.ts encontré varias rutas sin autenticación:
+    • Consulta de pedidos.
+    • Modificación de pedidos.
+    • Sincronización de información.
+    • Descarga del ZIP completo del proyecto.
+Especialmente preocupante es /api/download-zip, porque puede entregar el contenido del proyecto sin comprobar quién solicita la descarga.
+La ruta /api/sync/state también permite modificar información general sin verificar los permisos del solicitante.
+Corrección necesaria: proteger las rutas, verificar identidad y permisos, limitar solicitudes y restringir las descargas.
+5. Separación de sucursales e inventario
+Crítico
+Encontré que el inventario se guarda en un único documento:
+inventario/main
+Allí se almacena una lista completa de existencias, en lugar de una estructura que garantice la separación de cada sucursal.
+También encontré un mecanismo de sincronización que reemplaza el catálogo de productos de Firestore con el catálogo local y elimina los productos que no encuentra en ese equipo.
+En una instalación multisucursal esto puede ocasionar conflictos y pérdida de información.
+Corrección necesaria:
+    • Identificar inequívocamente cada registro.
+    • Separar existencias por sucursal.
+    • Sincronizar movimientos individuales.
+    • Evitar que una sucursal elimine información de otra.
+    • Incorporar control de versiones y conflictos de sincronización.
+      6. Protección de datos y archivos
+      Alto
+      El ZIP contiene data/server_db.json, que incluye registros de pedidos con datos personales de clientes.
+No debemos distribuir ese archivo con información de clientes.
+También falta un .gitignore en la raíz del proyecto.
+Corrección necesaria: separar los datos de prueba de los datos operativos, excluir archivos sensibles de las distribuciones y establecer políticas de protección de datos.
+2. Otros problemas técnicos encontrados
+Elemento	Problema	Prioridad
+Supabase	Todavía existen integraciones activas en App.tsx y otros módulos.	Alta
+Firebase	La sincronización masiva no divide las operaciones en lotes de máximo 500 escrituras.	Alta
+Inventario	Un documento único puede alcanzar el límite de tamaño de Firestore.	Alta
+Servidor JSON	Los errores de escritura se capturan, pero no se notifican correctamente a las operaciones que dependen del guardado.	Alta
+Respaldos	La validación del JSON no comprueba suficientemente la integridad de cada registro.	Media
+Sincronización	No hay un mecanismo robusto de resolución de modificaciones simultáneas.	Alta
+Proyecto	El archivo HTML independiente contiene una versión duplicada del sistema que puede quedar desactualizada.	Media
+Documentación	El README anuncia versiones de tecnologías distintas de las declaradas en package.json.	Media
+Hay otra cuestión: el README indica que existe un archivo .env.example, pero no está incluido en el ZIP. También hay que preparar correctamente la configuración de producción.
+3. Mi evaluación por áreas
+Esta es una valoración preliminar basada en la inspección del código, no una certificación de funcionamiento.
+Área	Estado observado
+Punto de venta	Necesita pruebas funcionales
+Inventario	Requiere corrección estructural
+Multisucursal	Requiere reforzar separación de datos
+Seguridad de usuarios	Insuficiente
+Firebase	Integrado, pero mal protegido
+Licencias	Protección vulnerable
+Sincronización	Requiere rediseño
+Respaldos JSON	Existe una implementación inicial
+Cuentas por cobrar y pagar	Pendiente de pruebas de integridad
+Auditoría	Existe módulo, pendiente de verificar su inmutabilidad
+Tienda online	Existe implementación, requiere pruebas de seguridad
+4. Plan de correcciones que recomiendo
+No recomiendo corregir los archivos al azar. Hay que hacerlo en este orden:
+    1. Primera etapa: Seguridad de la información
+        ◦ Corregir completamente Firestore Rules.
+        ◦ Implementar autenticación real.
+        ◦ Proteger todas las rutas del servidor.
+        ◦ Proteger los datos y credenciales.
+    2. Segunda etapa: Licenciamiento
+        ◦ Rediseñar la generación y validación de licencias.
+        ◦ Eliminar la licencia automática de desarrollador.
+        ◦ Implementar protección contra alteraciones.
+    3. Tercera etapa: Base de datos y multisucursal
+        ◦ Corregir identificadores únicos.
+        ◦ Separar inventarios por sucursal.
+        ◦ Evitar mezclar facturas y movimientos financieros.
+        ◦ Corregir sincronización simultánea.
+    4. Cuarta etapa: Limpieza y estabilidad
+        ◦ Eliminar Supabase y sus dependencias si confirmamos que Firebase será la única plataforma.
+        ◦ Eliminar archivos innecesarios.
+        ◦ Corregir dependencias y configuración.
+        ◦ Revisar el funcionamiento del servidor.
+    5. Quinta etapa: Respaldos y recuperación
+        ◦ Completar el respaldo JSON real.
+        ◦ Validar los archivos antes de restaurarlos.
+        ◦ Evitar restauraciones parciales o inconsistentes.
+        ◦ Probar recuperación de información.
+    6. Sexta etapa: Pruebas generales
+        ◦ Ventas y devoluciones.
+        ◦ Compras e inventario.
+        ◦ Cierres de caja.
+        ◦ Cuentas por cobrar y pagar.
+        ◦ Sincronización entre sucursales.
+        ◦ Funcionamiento sin internet y recuperación de conexión.
+

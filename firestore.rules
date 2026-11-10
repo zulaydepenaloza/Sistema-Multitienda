@@ -12,7 +12,7 @@ service cloud.firestore {
       allow read, write: if isValidId(docId);
     }
 
-    // Products: public read for online catalog, write for system updates
+    // Products: public read for online catalog, write restricted to valid product IDs
     match /productos/{productoId} {
       allow read: if true;
       allow write: if isValidId(productoId);
@@ -20,12 +20,14 @@ service cloud.firestore {
 
     // Online web orders placed by customers
     match /pedidos_online/{pedidoId} {
-      allow read: if true;
-      allow create: if isValidId(pedidoId);
+      allow read: if isValidId(pedidoId);
+      allow create: if isValidId(pedidoId) 
+        && request.resource.data.clienteNombre is string 
+        && request.resource.data.total is number;
       allow update, delete: if isValidId(pedidoId);
     }
 
-    // Enterprise configuration and daily exchange rate
+    // Enterprise configuration and daily official exchange rate
     match /empresa_config/{configId} {
       allow read: if true;
       allow write: if isValidId(configId);
@@ -42,9 +44,51 @@ service cloud.firestore {
       allow read, write: if isValidId(ventaId);
     }
 
-    // Default match for other collections (inventario, sucursales, auditoria)
+    // Branch inventory items
+    match /inventario/{docId} {
+      allow read, write: if isValidId(docId);
+    }
+
+    // Branch locations
+    match /sucursales/{sucursalId} {
+      allow read, write: if isValidId(sucursalId);
+    }
+
+    // System users and operators
+    match /usuarios/{usuarioId} {
+      allow read, write: if isValidId(usuarioId);
+    }
+
+    // Suppliers catalog
+    match /proveedores/{proveedorId} {
+      allow read, write: if isValidId(proveedorId);
+    }
+
+    // Purchase invoices from suppliers
+    match /compras/{compraId} {
+      allow read, write: if isValidId(compraId);
+    }
+
+    // Accounts Payable (CxP)
+    match /cuentas_por_pagar/{cxpId} {
+      allow read, write: if isValidId(cxpId);
+    }
+
+    // Accounts Receivable (CxC)
+    match /cuentas_por_cobrar/{cxcId} {
+      allow read, write: if isValidId(cxcId);
+    }
+
+    // Audit logs: append-only, immutable (cannot be updated or deleted)
+    match /auditoria/{logId} {
+      allow read: if isValidId(logId);
+      allow create: if isValidId(logId);
+      allow update, delete: if false; // Inmutabilidad de auditoría
+    }
+
+    // DEFAULT-DENY SAFETY NET: Block access to any undocumented paths
     match /{document=**} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
   }
 }

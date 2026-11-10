@@ -49,7 +49,6 @@ import {
   PedidoOnline,
   TiendaConfig,
 } from './types';
-import { FirebaseSyncSettings } from './components/FirebaseSyncSettings';
 import { CommercialCalculatorModal } from './components/CommercialCalculatorModal';
 import {
   testFirestoreConnection,
@@ -66,14 +65,8 @@ import {
   deleteProductFromFirestore,
   saveInventarioToFirestore,
 } from './lib/firebaseClient';
-import {
-  getStoredSupabaseConfig,
-  createCustomSupabaseClient,
-  addToSyncQueue,
-  processSyncQueue,
-} from './lib/supabaseClient';
-import { getStoredEmpresaConfig, saveEmpresaConfig, hasSetTasaToday, markTasaSetToday, formatUSD, formatBs, DEFAULT_EMPRESA_CONFIG, CLEAN_EMPRESA_CONFIG, isMockDefaultPhone, cleanMobileDigits } from './lib/currency';
-import { ShieldAlert, Lock, ShoppingCart, RefreshCw, Download, X, PanelLeftClose, PanelLeftOpen, Globe, Share2, QrCode, Copy, Check, ExternalLink, ShoppingBag, PackageCheck, ArrowRight, Flame } from 'lucide-react';
+import { getStoredEmpresaConfig, saveEmpresaConfig, hasSetTasaToday, markTasaSetToday, formatUSD, formatBs, DEFAULT_EMPRESA_CONFIG, CLEAN_EMPRESA_CONFIG, isMockDefaultPhone, cleanMobileDigits, fetchLiveBcvRate } from './lib/currency';
+import { ShieldAlert, Lock, ShoppingCart, RefreshCw, Download, X, Globe, Share2, QrCode, Copy, Check, ExternalLink, ShoppingBag, PackageCheck, ArrowRight, Flame, TrendingUp } from 'lucide-react';
 import { StandaloneHtmlDownloader } from './components/StandaloneHtmlDownloader';
 import { downloadStandaloneHtmlFile } from './lib/downloadHtml';
 import { createAuditEntry, INITIAL_AUDITORIA_LOGS } from './lib/auditLogger';
@@ -81,6 +74,7 @@ import {
   getMachineFingerprint,
   validateActivationKey,
   generateActivationKey,
+  createTrialLicenseForCurrentMachine,
   saveLicenseKey,
   getStoredLicenseKey,
   LicenseValidationResult,
@@ -227,6 +221,11 @@ export default function App() {
   const [showCalculatorModal, setShowCalculatorModal] = useState<boolean>(false);
   const [copiedStoreUrl, setCopiedStoreUrl] = useState<boolean>(false);
   const [nuevoPedidoNotificacion, setNuevoPedidoNotificacion] = useState<PedidoOnline | null>(null);
+  const [bcvAutoNotice, setBcvAutoNotice] = useState<{
+    tasa: number;
+    fecha: string;
+    fuente?: string;
+  } | null>(null);
 
   // Business Entities State
   const [sucursales, setSucursales] = useState<Sucursal[]>(() => {
@@ -335,19 +334,10 @@ export default function App() {
   const [licenseValidation, setLicenseValidation] = useState<LicenseValidationResult>(() => {
     let key = getStoredLicenseKey();
     if (!key) {
-      // Auto-provision initial Lifetime Developer License for this machine
-      const initialKey = generateActivationKey({
-        machineId: getMachineFingerprint(),
-        empresa: 'Corporación Los Andes C.A.',
-        rif: 'J-12345678-0',
-        tipo: 'vitalicia',
-        fechaEmision: new Date().toISOString().split('T')[0],
-        fechaVencimiento: 'VITALICIA',
-        cajasMax: 3,
-        sucursalesMax: 2,
-      });
-      saveLicenseKey(initialKey);
-      key = initialKey;
+      // Auto-provision initial 15-Day Trial License for this machine (not lifetime)
+      const trialKey = createTrialLicenseForCurrentMachine('Empresa Demo Evaluación', 'J-00000000-0');
+      saveLicenseKey(trialKey);
+      key = trialKey;
     }
     return validateActivationKey(key);
   });
@@ -536,15 +526,6 @@ export default function App() {
     }
   }, [isClientStoreMode]);
 
-  // Daily exchange rate check: prompt if not confirmed today
-  useEffect(() => {
-    if (!hasSetTasaToday()) {
-      const timer = setTimeout(() => {
-        setShowDailyRateModal(true);
-      }, 400);
-      return () => clearTimeout(timer);
-    }
-  }, [currentUser]);
 
   // RBAC Enforcement: If user changes and current tab is not allowed, switch to 'ventas'
   useEffect(() => {
@@ -692,6 +673,62 @@ export default function App() {
     );
   };
 
+  // Automated Daily exchange rate sync on startup:
+  // Automatically queries the official BCV exchange rate on system boot.
+  // If successful: updates the rate in the system, stores the sync date, and displays a confirmation notification.
+  // If offline or fails: prompts the operator with the DailyRateModal for manual entry/confirmation.
+  useEffect(() => {
+    let isMounted = true;
+
+    const performDailyRateRoutine = async () => {
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const lastAutoSync = localStorage.getItem('pos_last_bcv_auto_sync_date');
+
+      // If already synced today and today's rate is confirmed, skip
+      if (lastAutoSync === todayStr && hasSetTasaToday()) {
+        return;
+      }
+
+      try {
+        const live = await fetchLiveBcvRate();
+        if (!isMounted) return;
+
+        if (live && live.success && live.tasa && live.tasa > 0) {
+          const roundedTasa = Number(live.tasa.toFixed(2));
+          handleSaveTasa(roundedTasa);
+          try {
+            localStorage.setItem('pos_last_bcv_auto_sync_date', todayStr);
+          } catch (e) {}
+
+          setBcvAutoNotice({
+            tasa: roundedTasa,
+            fecha: live.fecha || new Date().toLocaleDateString('es-VE'),
+            fuente: live.fuente || 'Banco Central de Venezuela (BCV Oficial)',
+          });
+          return;
+        }
+      } catch (err) {
+        console.warn('Auto BCV rate sync routine notice:', err);
+      }
+
+      if (!isMounted) return;
+
+      // Fallback: If auto-fetch failed (e.g. offline machine) and rate not set today, open manual rate modal
+      if (!hasSetTasaToday()) {
+        setShowDailyRateModal(true);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      performDailyRateRoutine();
+    }, 400);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [currentUser]);
+
   // Firebase Firestore Real-Time Subscriptions (Zero suspension, 24/7 Google Cloud)
   useEffect(() => {
     // 1. Silent ping check
@@ -743,70 +780,6 @@ export default function App() {
     };
   }, []);
 
-  // Sync with real Supabase if credentials are provided
-  const loadCloudData = async () => {
-    const { url, anonKey } = getStoredSupabaseConfig();
-    const client = createCustomSupabaseClient(url, anonKey);
-    if (!client) return;
-
-    try {
-      const { data: sucs } = await client.from('sucursales').select('*');
-      if (sucs && sucs.length > 0) {
-        setSucursales(
-          sucs.map((s: any) => ({
-            id: s.id,
-            nombre: s.nombre,
-            tipo: s.id === 3 ? 'oficina' : 'tienda',
-          }))
-        );
-      }
-
-      const { data: prods } = await client.from('productos').select('*');
-      if (prods && prods.length > 0) {
-        setProductos(
-          prods.map((p: any) => ({
-            id: p.id,
-            codigo_barras: p.codigo_barras,
-            nombre: p.nombre,
-            precio: parseFloat(p.precio),
-          }))
-        );
-      }
-
-      const { data: inv } = await client.from('inventario').select('*');
-      if (inv && inv.length > 0) {
-        setInventario(inv);
-      }
-    } catch (e) {
-      console.warn('Could not fetch Supabase data directly (check RLS or keys):', e);
-    }
-  };
-
-  // Auto-sync queue with Supabase when online
-  useEffect(() => {
-    loadCloudData();
-
-    const runSync = async () => {
-      if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-      const { url, anonKey } = getStoredSupabaseConfig();
-      const client = createCustomSupabaseClient(url, anonKey);
-      if (client) {
-        await processSyncQueue(client);
-      }
-    };
-
-    const handleOnline = () => {
-      runSync();
-    };
-
-    window.addEventListener('online', handleOnline);
-    const timer = setInterval(runSync, 15000);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      clearInterval(timer);
-    };
-  }, []);
 
   // Calculate totals
   const totalSalesToday = ventas.reduce((acc, v) => acc + v.total, 0);
@@ -886,22 +859,6 @@ export default function App() {
       }
     );
 
-    // Queue for Supabase cloud sync
-    addToSyncQueue('ventas', 'insert', {
-      sucursal_id: sucursalId,
-      usuario_nombre: currentUser ? currentUser.nombre_completo : 'Cajero Anónimo',
-      cliente_nombre: cliente.nombre,
-      cliente_rif: cliente.rif,
-      fecha: nuevaVenta.fecha,
-      subtotal_neto: subtotalNeto,
-      base_imponible: baseImponible,
-      monto_exento: montoExento,
-      monto_iva: montoIva,
-      total: totalVenta,
-      metodo_pago: pagoDetalle.metodo,
-      detalles: JSON.stringify(detalles),
-    });
-
     // Deduct stock in inventario
     setInventario((prevInv) => {
       const updated = prevInv.map((invItem) => {
@@ -909,12 +866,6 @@ export default function App() {
           const soldItem = items.find((i) => i.producto.id === invItem.producto_id);
           if (soldItem) {
             const nextStock = Math.max(0, invItem.stock - soldItem.cantidad);
-            addToSyncQueue('inventario', 'upsert', {
-              id: invItem.id,
-              sucursal_id: sucursalId,
-              producto_id: invItem.producto_id,
-              stock: nextStock,
-            });
             return {
               ...invItem,
               stock: nextStock,
@@ -925,15 +876,6 @@ export default function App() {
       });
       return updated;
     });
-
-    // Trigger instant sync attempt if online
-    if (typeof navigator !== 'undefined' && navigator.onLine) {
-      const { url, anonKey } = getStoredSupabaseConfig();
-      const client = createCustomSupabaseClient(url, anonKey);
-      if (client) {
-        processSyncQueue(client).catch(() => {});
-      }
-    }
   };
 
   // Handler: Register new purchase from supplier with itemized invoice lines & catalog sync
@@ -1018,9 +960,15 @@ export default function App() {
       return nextInv;
     });
 
-    // Create automatic CxP if desired
+    // Create automatic CxP if credit purchase
     const prov = proveedores.find((p) => p.id === compraData.proveedorId);
-    if (prov) {
+    if (prov && compraData.condicionPago === 'credito') {
+      const vcto = compraData.fechaVencimiento 
+        ? compraData.fechaVencimiento 
+        : (compraData.diasCredito 
+            ? new Date(new Date(compraData.fecha).getTime() + compraData.diasCredito * 24 * 3600 * 1000).toISOString()
+            : new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString());
+
       const newCxp: CuentaPorPagar = {
         id: cxpList.length + 1,
         proveedorId: prov.id,
@@ -1028,7 +976,7 @@ export default function App() {
         compraId: newId,
         numeroFactura: compraData.numeroFactura || `FAC-${newId}`,
         fechaEmision: compraData.fecha,
-        fechaVencimiento: compraData.fechaVencimiento || new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString(),
+        fechaVencimiento: vcto,
         montoTotal: compraData.total,
         saldoRestante: compraData.total,
         estado: 'pendiente',
@@ -1874,6 +1822,7 @@ export default function App() {
         usuarios={usuarios}
         currentUser={currentUser}
         isInternalPreview={isInternalPreview}
+        onOpenStoreShare={() => setShowStoreShareModal(true)}
         onCrearPedido={handleCrearPedidoOnline}
         onVolverAlPos={() => {
           setIsClientStoreMode(false);
@@ -1961,30 +1910,21 @@ export default function App() {
           {/* Top Quick Metrics & Status Banner */}
           <div className="bg-slate-900/60 border-b border-slate-800/80 px-4 sm:px-6 py-2.5 flex items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              {/* Toggle Sidebar Button in Top Bar */}
-              <button
-                type="button"
-                onClick={() => setIsSidebarCollapsed((prev) => !prev)}
-                className="p-1.5 rounded-lg bg-slate-800/90 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700/80 transition-colors cursor-pointer flex items-center gap-1.5 text-xs shadow-sm"
-                title={isSidebarCollapsed ? 'Expandir menú lateral' : 'Colapsar menú lateral hacia la izquierda'}
-              >
-                {isSidebarCollapsed ? (
-                  <PanelLeftOpen className="w-4 h-4 text-emerald-400" />
-                ) : (
-                  <PanelLeftClose className="w-4 h-4 text-slate-400" />
-                )}
-                <span className="hidden md:inline font-medium text-[11px]">
-                  {isSidebarCollapsed ? 'Expandir Menú' : 'Colapsar Menú'}
-                </span>
-              </button>
-
               <span className="text-xs font-semibold text-slate-300 truncate">
                 {empresaConfig.nombreEmpresa}
               </span>
               <span className="text-slate-600 hidden sm:inline">•</span>
-              <span className="text-xs text-emerald-400 font-mono font-medium hidden sm:inline">
-                1 USD = {formatBs(1, empresaConfig.tasaCambio)}
-              </span>
+              <button
+                type="button"
+                onClick={() => setShowDailyRateModal(true)}
+                className="text-xs text-emerald-400 font-mono font-medium hidden sm:flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-colors cursor-pointer"
+                title="Tasa de cambio del día (Click para cambiar manualmente o consultar BCV en vivo)"
+              >
+                <span>1 USD = {formatBs(1, empresaConfig.tasaCambio)}</span>
+                <span className="text-[10px] text-emerald-300 font-sans underline opacity-80 hover:opacity-100">
+                  (Ajustar)
+                </span>
+              </button>
             </div>
 
             <div className="flex items-center gap-3 text-xs">
@@ -1995,44 +1935,6 @@ export default function App() {
                   ({formatBs(totalSalesToday, empresaConfig.tasaCambio)})
                 </span>
               </div>
-
-              {/* Client Store Link / Share Button in top banner */}
-              <button
-                type="button"
-                onClick={() => setShowStoreShareModal(true)}
-                className="px-2.5 py-1 rounded-lg bg-teal-500/20 hover:bg-teal-500/30 text-teal-300 border border-teal-500/40 font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs"
-                title="Obtener y compartir el link de la tienda online para clientes"
-              >
-                <Globe className="w-3.5 h-3.5 text-teal-400 stroke-[2.5]" />
-                <span className="hidden sm:inline">Link Tienda Clientes</span>
-              </button>
-
-              {/* Standalone HTML / Laptop Options button directly in top banner (General Manager only) */}
-              {isGeneralManager && (
-                <button
-                  type="button"
-                  onClick={() => setShowHtmlModal(true)}
-                  className="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 font-bold flex items-center gap-1.5 transition-all cursor-pointer text-xs"
-                  title="Abrir en Laptop / Descargar HTML (Acceso exclusivo Gerente General)"
-                >
-                  <Download className="w-3.5 h-3.5 text-emerald-400 stroke-[2.5]" />
-                  <span className="hidden sm:inline">Laptop / .HTML</span>
-                </button>
-              )}
-
-              {/* Firebase Cloud Database Status & Sync button */}
-              <FirebaseSyncSettings
-                productos={productos}
-                empresaConfig={empresaConfig}
-                tiendaConfig={tiendaConfig}
-                sucursales={sucursales}
-                inventario={inventario}
-                onDataLoadedFromCloud={(data) => {
-                  if (data.productos && data.productos.length > 0) setProductos(data.productos);
-                  if (data.empresaConfig) applyEmpresaConfigUpdate(data.empresaConfig);
-                  if (data.tiendaConfig) setTiendaConfig(data.tiendaConfig);
-                }}
-              />
             </div>
           </div>
 
@@ -2271,6 +2173,11 @@ export default function App() {
                     onOpenCalculator={() => setShowCalculatorModal(true)}
                     onOpenStoreShare={() => setShowStoreShareModal(true)}
                     onOpenHtmlModal={() => setShowHtmlModal(true)}
+                    onDataLoadedFromCloud={(data) => {
+                      if (data.productos && data.productos.length > 0) setProductos(data.productos);
+                      if (data.empresaConfig) applyEmpresaConfigUpdate(data.empresaConfig);
+                      if (data.tiendaConfig) setTiendaConfig(data.tiendaConfig);
+                    }}
                   />
                 )}
               </>
@@ -2322,6 +2229,60 @@ export default function App() {
             >
               <span>Atender en Pedidos Web</span>
               <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notificación Cotización Diaria Actualizada Automáticamente */}
+      {bcvAutoNotice && (
+        <div className="fixed bottom-4 right-4 z-50 max-w-sm w-full bg-slate-900/95 backdrop-blur-md border-2 border-emerald-500/80 rounded-2xl p-4 shadow-2xl shadow-emerald-500/20 animate-fade-in">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
+                <TrendingUp className="w-5 h-5 text-emerald-400" />
+              </div>
+              <div className="space-y-0.5 min-w-0">
+                <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400 block">
+                  Cotización Oficial Actualizada
+                </span>
+                <p className="text-base font-black font-mono text-white">
+                  1 USD = {formatBs(1, bcvAutoNotice.tasa)}
+                </p>
+                <p className="text-[11px] text-slate-300">
+                  {bcvAutoNotice.fuente || 'Banco Central de Venezuela (BCV Oficial)'}
+                </p>
+                <p className="text-[10px] text-slate-400">
+                  Sincronizado hoy: {bcvAutoNotice.fecha}
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setBcvAutoNotice(null)}
+              className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              title="Cerrar notificación"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setShowDailyRateModal(true);
+                setBcvAutoNotice(null);
+              }}
+              className="flex-1 py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <span>Ajustar Manualmente</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setBcvAutoNotice(null)}
+              className="py-1.5 px-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs transition-all cursor-pointer shadow-sm"
+            >
+              Entendido
             </button>
           </div>
         </div>

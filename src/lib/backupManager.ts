@@ -213,6 +213,89 @@ export function validateAndParseBackupJson(rawJson: string): ValidationBackupRes
     };
   }
 
+  // Deep record-level integrity validation and sanitization
+  const sanitizedProductos: any[] = [];
+  if (Array.isArray(normalizedData.productos)) {
+    for (const prod of normalizedData.productos) {
+      if (prod && typeof prod === 'object' && prod.nombre && typeof prod.nombre === 'string') {
+        const idNum = Number(prod.id);
+        const precioNum = Number(prod.precio);
+        if (!isNaN(idNum) && !isNaN(precioNum) && precioNum >= 0) {
+          sanitizedProductos.push({
+            id: idNum,
+            nombre: String(prod.nombre).trim().slice(0, 150),
+            precio: precioNum,
+            codigo_barras: String(prod.codigo_barras || `SKU-${idNum}`).trim(),
+            costo: typeof prod.costo === 'number' && !isNaN(prod.costo) ? prod.costo : 0,
+            unidad_medida: String(prod.unidad_medida || 'UND'),
+            exento_iva: Boolean(prod.exento_iva),
+            categoria: String(prod.categoria || 'General'),
+            descripcion: String(prod.descripcion || '').slice(0, 300),
+            imagen: typeof prod.imagen === 'string' ? prod.imagen : '',
+            destacadoTienda: prod.destacadoTienda !== undefined ? Boolean(prod.destacadoTienda) : true,
+          });
+        }
+      }
+    }
+  }
+
+  const sanitizedVentas: any[] = [];
+  if (Array.isArray(normalizedData.ventas)) {
+    for (const v of normalizedData.ventas) {
+      if (v && typeof v === 'object' && v.id) {
+        const totalNum = Number(v.total);
+        if (!isNaN(totalNum) && totalNum >= 0) {
+          sanitizedVentas.push(v);
+        }
+      }
+    }
+  }
+
+  // Ensure inventory items point to valid IDs
+  const sanitizedInventario: any[] = [];
+  if (Array.isArray(normalizedData.inventario)) {
+    for (const inv of normalizedData.inventario) {
+      if (inv && typeof inv === 'object') {
+        const pId = Number(inv.producto_id);
+        const sId = Number(inv.sucursal_id);
+        const stockNum = Number(inv.stock);
+        if (!isNaN(pId) && !isNaN(sId) && !isNaN(stockNum)) {
+          sanitizedInventario.push({
+            producto_id: pId,
+            sucursal_id: sId,
+            stock: stockNum,
+          });
+        }
+      }
+    }
+  }
+
+  // Sanitize users: prevent lockout by ensuring valid PIN and roles
+  const sanitizedUsuarios: any[] = [];
+  if (Array.isArray(normalizedData.usuarios)) {
+    for (const u of normalizedData.usuarios) {
+      if (u && typeof u === 'object' && u.username && u.pin) {
+        sanitizedUsuarios.push({
+          id: Number(u.id) || Date.now(),
+          nombre_completo: String(u.nombre_completo || u.username),
+          username: String(u.username).toLowerCase().trim(),
+          pin: String(u.pin).trim(),
+          rol: u.rol || 'cajero',
+          sucursal_id: u.sucursal_id !== undefined ? u.sucursal_id : 1,
+          permisos: u.permisos || {},
+        });
+      }
+    }
+  }
+
+  // Prevent bricking: if usuarios in backup was empty or corrupt, do not wipe existing users!
+  normalizedData.productos = sanitizedProductos;
+  normalizedData.ventas = sanitizedVentas;
+  normalizedData.inventario = sanitizedInventario;
+  if (sanitizedUsuarios.length > 0) {
+    normalizedData.usuarios = sanitizedUsuarios;
+  }
+
   const payload: BackupDatabasePayload = {
     version,
     app: parsed.app || 'POS Multi-Sucursal Venezuela',
@@ -224,8 +307,8 @@ export function validateAndParseBackupJson(rawJson: string): ValidationBackupRes
       rif,
     },
     resumen: {
-      totalProductos: Array.isArray(normalizedData.productos) ? normalizedData.productos.length : 0,
-      totalVentas: Array.isArray(normalizedData.ventas) ? normalizedData.ventas.length : 0,
+      totalProductos: normalizedData.productos.length,
+      totalVentas: normalizedData.ventas.length,
       totalCompras: Array.isArray(normalizedData.compras) ? normalizedData.compras.length : 0,
       totalClientes: Array.isArray(normalizedData.clientes) ? normalizedData.clientes.length : 0,
       totalProveedores: Array.isArray(normalizedData.proveedores) ? normalizedData.proveedores.length : 0,

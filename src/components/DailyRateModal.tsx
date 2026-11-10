@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { DollarSign, ArrowRight, CheckCircle2, TrendingUp, Calendar, ShieldCheck, Sparkles } from 'lucide-react';
+import { DollarSign, ArrowRight, CheckCircle2, TrendingUp, Calendar, ShieldCheck, Sparkles, RefreshCw } from 'lucide-react';
 import { EmpresaConfig } from '../types';
-import { formatUSD, formatBs } from '../lib/currency';
+import { formatUSD, formatBs, fetchLiveBcvRate } from '../lib/currency';
 
 interface DailyRateModalProps {
   isOpen: boolean;
@@ -20,17 +20,38 @@ export const DailyRateModal: React.FC<DailyRateModalProps> = ({
   onClose,
   isMandatory = false,
 }) => {
-  const initialRate = empresaConfig?.tasaCambio ?? currentRate ?? 36.50;
+  const initialRate = empresaConfig?.tasaCambio ?? currentRate ?? 850;
   const [rateInput, setRateInput] = useState<string>(initialRate.toString());
   const [error, setError] = useState<string | null>(null);
+  const [isFetchingBcv, setIsFetchingBcv] = useState<boolean>(false);
+  const [bcvSourceNotice, setBcvSourceNotice] = useState<string | null>(null);
 
   // Sync rateInput if initialRate changes
   React.useEffect(() => {
     if (isOpen) {
-      const activeRate = empresaConfig?.tasaCambio ?? currentRate ?? 36.50;
+      const activeRate = empresaConfig?.tasaCambio ?? currentRate ?? 850;
       setRateInput(activeRate.toString());
+      setBcvSourceNotice(null);
     }
   }, [isOpen, empresaConfig?.tasaCambio, currentRate]);
+
+  const handleFetchBcvLive = async () => {
+    setIsFetchingBcv(true);
+    setError(null);
+    try {
+      const res = await fetchLiveBcvRate();
+      if (res.success && res.tasa) {
+        setRateInput(res.tasa.toString());
+        setBcvSourceNotice(`✅ Obtenida del ${res.fuente || 'Banco Central de Venezuela (BCV Oficial)'}`);
+      } else {
+        setError(res.error || 'No se pudo obtener la tasa oficial automáticamente. Ingrésela manualmente.');
+      }
+    } catch (e: any) {
+      setError('Error al conectar con el servicio de tasa oficial.');
+    } finally {
+      setIsFetchingBcv(false);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -103,9 +124,29 @@ export const DailyRateModal: React.FC<DailyRateModalProps> = ({
                 placeholder="Ejemplo: 36.50"
               />
             </div>
-            <p className="text-[11px] text-slate-500 flex items-center gap-1.5">
+
+            {/* Live BCV Query Button */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={handleFetchBcvLive}
+                disabled={isFetchingBcv}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/40 font-bold text-xs py-2.5 px-3 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isFetchingBcv ? 'animate-spin' : ''}`} />
+                <span>{isFetchingBcv ? 'Consultando Banco Central (BCV)...' : '🔄 Consultar Tasa Oficial BCV en Vivo'}</span>
+              </button>
+            </div>
+
+            {bcvSourceNotice && (
+              <div className="text-[11px] text-emerald-300 bg-emerald-950/60 border border-emerald-500/40 px-3 py-1.5 rounded-xl font-medium">
+                {bcvSourceNotice}
+              </div>
+            )}
+
+            <p className="text-[11px] text-slate-500 flex items-center gap-1.5 pt-1">
               <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-              Esta tasa se aplicará en las 3 computadoras (Tienda 1, Tienda 2 y Gerencia).
+              Esta tasa se aplicará inmediatamente a las 3 sucursales e inventarios del sistema.
             </p>
           </div>
 

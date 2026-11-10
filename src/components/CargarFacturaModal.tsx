@@ -42,6 +42,8 @@ interface ParsedInvoiceData {
   numeroFactura: string;
   numeroControl?: string;
   fechaFactura?: string;
+  fechaVencimiento?: string;
+  diasCredito?: number;
   condicionPago?: 'contado' | 'credito';
   items: ParsedItem[];
   subtotalNeto?: number;
@@ -66,6 +68,8 @@ interface CargarFacturaModalProps {
     numeroFactura: string;
     numeroControl: string;
     fechaFactura: string;
+    fechaVencimiento?: string;
+    diasCredito?: number;
     condicionPago: 'credito' | 'contado';
     items: DetalleCompra[];
     newProducts: Producto[];
@@ -169,8 +173,42 @@ export const CargarFacturaModal: React.FC<CargarFacturaModalProps> = ({
   const [editNumeroControl, setEditNumeroControl] = useState('');
   const [editFechaFactura, setEditFechaFactura] = useState('');
   const [editCondicionPago, setEditCondicionPago] = useState<'contado' | 'credito'>('credito');
+  const [editDiasCredito, setEditDiasCredito] = useState<number>(7);
+  const [editFechaVencimiento, setEditFechaVencimiento] = useState<string>('');
   const [editItems, setEditItems] = useState<ParsedItem[]>([]);
   const [convertItemIndex, setConvertItemIndex] = useState<number | null>(null);
+
+  // Helper: sync due date when credit days change
+  const handleSetDiasCredito = (days: number) => {
+    const validDays = Math.max(1, days);
+    setEditDiasCredito(validDays);
+    const baseDate = editFechaFactura ? new Date(editFechaFactura + 'T12:00:00Z') : new Date();
+    const vcto = new Date(baseDate.getTime() + validDays * 24 * 3600 * 1000);
+    setEditFechaVencimiento(vcto.toISOString().split('T')[0]);
+  };
+
+  // Helper: sync credit days when user picks a date from calendar
+  const handleFechaVencimientoChange = (vctoStr: string) => {
+    setEditFechaVencimiento(vctoStr);
+    if (vctoStr && editFechaFactura) {
+      const emisionDate = new Date(editFechaFactura + 'T12:00:00Z');
+      const vctoDate = new Date(vctoStr + 'T12:00:00Z');
+      const diffDays = Math.round((vctoDate.getTime() - emisionDate.getTime()) / (1000 * 3600 * 24));
+      if (diffDays > 0) {
+        setEditDiasCredito(diffDays);
+      }
+    }
+  };
+
+  // Helper: sync due date when invoice emission date changes
+  const handleFechaFacturaChange = (emisionStr: string) => {
+    setEditFechaFactura(emisionStr);
+    if (emisionStr && editDiasCredito > 0) {
+      const baseDate = new Date(emisionStr + 'T12:00:00Z');
+      const vcto = new Date(baseDate.getTime() + editDiasCredito * 24 * 3600 * 1000);
+      setEditFechaVencimiento(vcto.toISOString().split('T')[0]);
+    }
+  };
 
   // Drag & drop state
   const [isDragging, setIsDragging] = useState(false);
@@ -205,8 +243,36 @@ export const CargarFacturaModal: React.FC<CargarFacturaModalProps> = ({
     setParsedData(data);
     setEditNumeroFactura(data.numeroFactura || `FAC-${Math.floor(1000 + Math.random() * 9000)}`);
     setEditNumeroControl(data.numeroControl || '');
-    setEditFechaFactura(data.fechaFactura || new Date().toISOString().split('T')[0]);
+    
+    const emisionStr = data.fechaFactura || new Date().toISOString().split('T')[0];
+    setEditFechaFactura(emisionStr);
     setEditCondicionPago(data.condicionPago || 'credito');
+
+    // Calculate exact credit days from AI extracted dates or explicit credit days
+    let days = data.diasCredito;
+    let vctoStr = data.fechaVencimiento;
+
+    if (vctoStr && emisionStr) {
+      const emisionDate = new Date(emisionStr + 'T12:00:00Z');
+      const vctoDate = new Date(vctoStr + 'T12:00:00Z');
+      const diffDays = Math.round((vctoDate.getTime() - emisionDate.getTime()) / (1000 * 3600 * 24));
+      if (diffDays > 0) {
+        days = diffDays;
+      }
+    }
+
+    if (!days || days <= 0) {
+      days = 7; // Default initial credit days
+    }
+
+    if (!vctoStr) {
+      const baseDate = new Date(emisionStr + 'T12:00:00Z');
+      const vcto = new Date(baseDate.getTime() + days * 24 * 3600 * 1000);
+      vctoStr = vcto.toISOString().split('T')[0];
+    }
+
+    setEditDiasCredito(days);
+    setEditFechaVencimiento(vctoStr);
 
     // Check if supplier exists
     const matchingProv = proveedores.find(
@@ -428,6 +494,8 @@ export const CargarFacturaModal: React.FC<CargarFacturaModalProps> = ({
       numeroControl: editNumeroControl.trim() || undefined,
       fecha: editFechaFactura || new Date().toISOString(),
       condicionPago: editCondicionPago,
+      diasCredito: editCondicionPago === 'credito' ? editDiasCredito : undefined,
+      fechaVencimiento: editCondicionPago === 'credito' ? editFechaVencimiento : undefined,
       subtotalNeto: +calculatedSubtotalNeto.toFixed(2),
       baseImponible: +calculatedBaseImponible.toFixed(2),
       montoExento: +calculatedMontoExento.toFixed(2),
@@ -457,6 +525,8 @@ export const CargarFacturaModal: React.FC<CargarFacturaModalProps> = ({
       numeroFactura: editNumeroFactura.trim() || `FAC-${Date.now().toString().slice(-6)}`,
       numeroControl: editNumeroControl.trim(),
       fechaFactura: editFechaFactura,
+      fechaVencimiento: editCondicionPago === 'credito' ? editFechaVencimiento : undefined,
+      diasCredito: editCondicionPago === 'credito' ? editDiasCredito : undefined,
       condicionPago: editCondicionPago,
       items: detalles,
       newProducts: newCatalogProducts,
@@ -774,7 +844,7 @@ export const CargarFacturaModal: React.FC<CargarFacturaModalProps> = ({
                   <input
                     type="date"
                     value={editFechaFactura}
-                    onChange={(e) => setEditFechaFactura(e.target.value)}
+                    onChange={(e) => handleFechaFacturaChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-2.5 py-2 rounded-xl font-mono"
                   />
                 </div>
@@ -788,10 +858,71 @@ export const CargarFacturaModal: React.FC<CargarFacturaModalProps> = ({
                     onChange={(e) => setEditCondicionPago(e.target.value as any)}
                     className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-3 py-2 rounded-xl"
                   >
-                    <option value="credito">Crédito (CxP 15 Días)</option>
+                    <option value="credito">Crédito (Cuentas por Pagar)</option>
                     <option value="contado">Contado</option>
                   </select>
                 </div>
+
+                {editCondicionPago === 'credito' && (
+                  <div className="sm:col-span-12 bg-indigo-950/40 border border-indigo-500/40 rounded-xl p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-bold text-indigo-300">
+                          Plazo de Crédito del Proveedor:
+                        </span>
+                        <div className="flex items-center gap-1">
+                          {[7, 14, 15, 21, 30].map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => handleSetDiasCredito(d)}
+                              className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-all cursor-pointer ${
+                                editDiasCredito === d
+                                  ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-500/50 ring-1 ring-white/20'
+                                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white'
+                              }`}
+                            >
+                              {d}d
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[11px] font-medium text-slate-400">Días:</label>
+                          <input
+                            type="number"
+                            min="1"
+                            max="365"
+                            value={editDiasCredito}
+                            onChange={(e) => handleSetDiasCredito(parseInt(e.target.value) || 1)}
+                            className="w-16 bg-slate-900 border border-indigo-500/50 text-indigo-200 text-xs px-2 py-1 rounded-lg text-center font-bold"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1.5">
+                          <label className="text-[11px] font-medium text-slate-400">Vencimiento:</label>
+                          <input
+                            type="date"
+                            value={editFechaVencimiento}
+                            onChange={(e) => handleFechaVencimientoChange(e.target.value)}
+                            className="bg-slate-900 border border-indigo-500/50 text-indigo-200 text-xs px-2 py-1 rounded-lg font-mono font-bold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-indigo-300/90 pt-1 border-t border-indigo-900/50">
+                      <span>
+                        ℹ️ Detectado por IA o ajustado: Factura del <strong>{editFechaFactura}</strong> vencerá el <strong>{editFechaVencimiento}</strong>.
+                      </span>
+                      <span className="font-semibold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                        {editDiasCredito} días de crédito
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Items Table */}

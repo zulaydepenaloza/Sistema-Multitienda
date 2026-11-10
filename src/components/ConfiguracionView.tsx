@@ -38,6 +38,11 @@ import {
   Layers,
   ExternalLink,
   Copy,
+  Cloud,
+  HardDrive,
+  Cpu,
+  ArrowUpRight,
+  ArrowDownRight,
 } from 'lucide-react';
 import { Usuario, EmpresaConfig, Sucursal, ModuloPermisos, RegistroAuditoria, Producto, InventarioItem, Venta, Compra, Cliente, Proveedor, CuentaPorCobrar, CuentaPorPagar, PedidoOnline, TiendaConfig, BackupDatabasePayload } from '../types';
 import { formatBs, formatUSD } from '../lib/currency';
@@ -47,7 +52,7 @@ import { AuditoriaView } from './AuditoriaView';
 import { LicenseManagerView } from './LicenseManagerView';
 import { LicenseValidationResult } from '../lib/licensing';
 import { BackupRestoreView } from './BackupRestoreView';
-import { testFirestoreConnection, syncAllToFirestore } from '../lib/firebaseClient';
+import { testFirestoreConnection, syncAllToFirestore, fetchAllFromFirestore } from '../lib/firebaseClient';
 
 interface ConfiguracionViewProps {
   usuarios: Usuario[];
@@ -84,6 +89,7 @@ interface ConfiguracionViewProps {
   onOpenCalculator?: () => void;
   onOpenStoreShare?: () => void;
   onOpenHtmlModal?: () => void;
+  onDataLoadedFromCloud?: (data: { productos?: Producto[]; empresaConfig?: EmpresaConfig; tiendaConfig?: TiendaConfig }) => void;
 }
 
 export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
@@ -116,10 +122,144 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
   onOpenCalculator,
   onOpenStoreShare,
   onOpenHtmlModal,
+  onDataLoadedFromCloud,
 }) => {
   const isGeneralManager = currentUser?.rol === 'admin';
 
-  const [activeSubTab, setActiveSubTab] = useState<'usuarios' | 'empresa' | 'sucursales' | 'tasa' | 'licencia' | 'auditoria' | 'respaldo' | 'html' | 'reinicio' | 'temporal'>('usuarios');
+  const [activeSubTab, setActiveSubTab] = useState<'usuarios' | 'empresa' | 'sucursales' | 'tasa' | 'licencia' | 'auditoria' | 'respaldo' | 'html' | 'nube' | 'reinicio' | 'temporal'>('usuarios');
+
+  // Cloud Firestore Database Management State
+  const [cloudStatus, setCloudStatus] = useState<{ isConnected: boolean | null; message: string; latency?: number }>({
+    isConnected: null,
+    message: 'Listo para comprobar conexión con Google Cloud Firestore.',
+  });
+  const [isTestingCloud, setIsTestingCloud] = useState<boolean>(false);
+  const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+  const [isDownloadingCloud, setIsDownloadingCloud] = useState<boolean>(false);
+  const [cloudNotice, setCloudNotice] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
+  React.useEffect(() => {
+    testFirestoreConnection()
+      .then((res) => {
+        setCloudStatus({
+          isConnected: res.success,
+          message: res.message,
+        });
+      })
+      .catch(() => {
+        setCloudStatus({
+          isConnected: false,
+          message: 'Sin conexión directa a Firestore',
+        });
+      });
+  }, []);
+
+  const handleTestCloudPing = async () => {
+    setIsTestingCloud(true);
+    setCloudNotice(null);
+    try {
+      const res = await testFirestoreConnection();
+      setCloudStatus({
+        isConnected: res.success,
+        message: res.message,
+      });
+      setCloudNotice({
+        type: res.success ? 'success' : 'error',
+        text: res.message,
+      });
+    } catch (e: any) {
+      setCloudStatus({
+        isConnected: false,
+        message: e?.message || 'Error al conectar con Firestore',
+      });
+      setCloudNotice({
+        type: 'error',
+        text: `Error de conexión: ${e?.message || e}`,
+      });
+    } finally {
+      setIsTestingCloud(false);
+    }
+  };
+
+  const handleUploadAllToFirestore = async () => {
+    setIsSyncingCloud(true);
+    setCloudNotice(null);
+    try {
+      const res = await syncAllToFirestore({
+        productos,
+        empresaConfig,
+        tiendaConfig: tiendaConfig || {
+          nombreTienda: empresaConfig.nombreEmpresa,
+          whatsappContacto: empresaConfig.telefono,
+          costoDelivery: 0,
+          montoMinimoDelivery: 0,
+          pagoMovilBanco: '',
+          pagoMovilTelefono: '',
+          pagoMovilCedula: '',
+        },
+        sucursales,
+        inventario,
+      });
+
+      if (res.success) {
+        setCloudStatus((prev) => ({ ...prev, isConnected: true }));
+        setCloudNotice({
+          type: 'success',
+          text: `¡Catálogo y datos sincronizados con total éxito! Se actualizaron ${res.count} productos y todas las configuraciones en Firestore.`,
+        });
+        if (onLogAudit) {
+          onLogAudit(
+            'Configuración',
+            'SISTEMA',
+            `Sincronización masiva de base de datos a Google Cloud Firestore (${res.count} productos)`,
+            { detalles: 'Subida manual ejecutada desde el panel de Base de Datos Cloud' }
+          );
+        }
+      } else {
+        setCloudNotice({
+          type: 'error',
+          text: `Fallo en la sincronización: ${res.error || 'Error desconocido'}`,
+        });
+      }
+    } catch (err: any) {
+      setCloudNotice({
+        type: 'error',
+        text: `Error durante la subida: ${err?.message || err}`,
+      });
+    } finally {
+      setIsSyncingCloud(false);
+    }
+  };
+
+  const handleDownloadAllFromFirestore = async () => {
+    setIsDownloadingCloud(true);
+    setCloudNotice(null);
+    try {
+      const data = await fetchAllFromFirestore();
+      if (data && (data.productos || data.empresaConfig || data.tiendaConfig)) {
+        setCloudStatus((prev) => ({ ...prev, isConnected: true }));
+        if (onDataLoadedFromCloud) {
+          onDataLoadedFromCloud(data);
+        }
+        setCloudNotice({
+          type: 'success',
+          text: `Datos descargados desde la nube exitosamente (${data.productos?.length || 0} productos recibidos).`,
+        });
+      } else {
+        setCloudNotice({
+          type: 'info',
+          text: 'No se encontraron datos nuevos en la nube o el catálogo remoto está vacío.',
+        });
+      }
+    } catch (err: any) {
+      setCloudNotice({
+        type: 'error',
+        text: `Error al descargar desde Firestore: ${err?.message || err}`,
+      });
+    } finally {
+      setIsDownloadingCloud(false);
+    }
+  };
 
   // Reset Modal & Verification State
   const [showResetModal, setShowResetModal] = useState<boolean>(false);
@@ -622,6 +762,29 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
           >
             <Download className="w-4 h-4 shrink-0" />
             <span>Descargar .HTML</span>
+          </button>
+
+          {/* Solapa: Base de Datos en la Nube (Google Cloud Firebase Firestore) */}
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('nube')}
+            className={`px-3.5 py-2 rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer ${
+              activeSubTab === 'nube'
+                ? 'bg-emerald-500 text-slate-950 font-black shadow-md shadow-emerald-500/30 ring-2 ring-emerald-400 z-10'
+                : 'text-slate-300 hover:text-white bg-slate-900/90 hover:bg-slate-800 border border-slate-800 font-semibold shadow-sm'
+            }`}
+          >
+            <Cloud className="w-4 h-4 shrink-0 text-cyan-400" />
+            <span>Base de Datos Cloud</span>
+            <span
+              className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-bold uppercase ml-0.5 ${
+                activeSubTab === 'nube'
+                  ? 'bg-slate-950/30 text-slate-950'
+                  : 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+              }`}
+            >
+              FIRESTORE
+            </span>
           </button>
 
           {/* Solapa Especial: Módulo Temporal / Botones Auxiliares */}
@@ -1422,20 +1585,40 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
             </button>
           </div>
 
-          <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 max-w-md space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-slate-400">Tasa Oficial Vigente:</span>
-              <span className="text-2xl font-black font-mono text-emerald-400">
-                {formatBs(1, empresaConfig.tasaCambio)}
-              </span>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-3xl">
+            <div className="bg-slate-950 p-6 rounded-2xl border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-400">Tasa Oficial Vigente:</span>
+                <span className="text-2xl font-black font-mono text-emerald-400">
+                  {formatBs(1, empresaConfig.tasaCambio)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/80 pt-3">
+                <span>Fecha de Fijación:</span>
+                <span className="font-mono text-white">{empresaConfig.fechaTasa}</span>
+              </div>
+              <div className="flex items-center justify-between text-xs text-slate-400">
+                <span>Fuente / Modalidad:</span>
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  Oficial BCV / Manual
+                </span>
+              </div>
             </div>
-            <div className="flex items-center justify-between text-xs text-slate-400 border-t border-slate-800/80 pt-3">
-              <span>Fecha de Fijación:</span>
-              <span className="font-mono text-white">{empresaConfig.fechaTasa}</span>
-            </div>
-            <div className="flex items-center justify-between text-xs text-slate-400">
-              <span>Fijada por:</span>
-              <span className="text-slate-200">Gerencia General / BCV</span>
+
+            <div className="bg-slate-950/70 p-6 rounded-2xl border border-slate-800 space-y-3 text-xs text-slate-300">
+              <div className="font-bold text-white flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-extrabold border border-emerald-500/30">
+                  AUTOMÁTICO + MANUAL
+                </span>
+                <span>Modo de Operación</span>
+              </div>
+              <p className="text-slate-400 leading-relaxed text-[11px]">
+                <strong>1. Automático diario:</strong> Al iniciar el sistema cada día, se consulta y actualiza automáticamente la cotización oficial del Banco Central de Venezuela (BCV).
+              </p>
+              <p className="text-slate-400 leading-relaxed text-[11px]">
+                <strong>2. Manual en cualquier momento:</strong> Si necesitas fijar una tasa distinta o si el equipo trabaja sin conexión a internet, puedes pulsar en <em>Actualizar Tasa Ahora</em> o pulsar en la cotización de la barra superior.
+              </p>
             </div>
           </div>
         </div>
@@ -1522,6 +1705,204 @@ export const ConfiguracionView: React.FC<ConfiguracionViewProps> = ({
           onRestoreDatabase={onRestoreDatabase || (() => {})}
           onLogAudit={onLogAudit}
         />
+      )}
+
+      {/* ======================================================== */}
+      {/* SUB-TAB: BASE DE DATOS EN LA NUBE (FIREBASE FIRESTORE)  */}
+      {/* ======================================================== */}
+      {activeSubTab === 'nube' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Header Banner */}
+          <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-cyan-950/40 border border-cyan-500/30 rounded-3xl p-6 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-80 h-80 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+              <div className="flex items-center gap-3.5">
+                <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center border border-cyan-500/30 shadow-lg shadow-cyan-500/10 shrink-0">
+                  <Cloud className="w-6 h-6" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-extrabold text-white">
+                      Base de Datos en la Nube · Google Cloud Firestore
+                    </h3>
+                    <span className="bg-cyan-500 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider">
+                      PRODUCCIÓN 24/7
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">
+                    Almacenamiento persistente en servidores de Google con replicación multi-zona, sincronización continua en tiempo real y soporte autónomo para trabajar sin internet.
+                  </p>
+                </div>
+              </div>
+
+              {/* Status Badge & Latency Ping */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleTestCloudPing}
+                  disabled={isTestingCloud}
+                  className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-sm disabled:opacity-50"
+                  title="Comprobar comunicación directa con los servidores de Google"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${isTestingCloud ? 'animate-spin' : ''}`} />
+                  <span>{isTestingCloud ? 'Comprobando...' : 'Probar Conexión'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Connection Status Pill Banner */}
+            <div className="mt-4 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`w-2.5 h-2.5 rounded-full ${
+                    cloudStatus.isConnected === true
+                      ? 'bg-emerald-400 shadow-md shadow-emerald-400/50 animate-pulse'
+                      : cloudStatus.isConnected === false
+                      ? 'bg-rose-500'
+                      : 'bg-amber-400'
+                  }`}
+                />
+                <span className="font-semibold text-slate-300">
+                  Estado del Servidor:
+                </span>
+                <span
+                  className={`font-mono font-bold ${
+                    cloudStatus.isConnected === true
+                      ? 'text-emerald-400'
+                      : cloudStatus.isConnected === false
+                      ? 'text-rose-400'
+                      : 'text-amber-400'
+                  }`}
+                >
+                  {cloudStatus.isConnected === true
+                    ? 'Conectado a Google Cloud (Clúster Activo)'
+                    : cloudStatus.isConnected === false
+                    ? 'Sin Conexión Directa (Modo Local Activo)'
+                    : 'Listo para comprobar'}
+                </span>
+              </div>
+              <div className="text-[11px] text-slate-400 font-mono">
+                Proyecto: <span className="text-cyan-300 font-bold">ai-studio-sistemamultisucu</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Feedback Notice */}
+          {cloudNotice && (
+            <div
+              className={`p-4 rounded-2xl border text-xs flex items-center justify-between gap-3 animate-fade-in ${
+                cloudNotice.type === 'success'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                  : cloudNotice.type === 'error'
+                  ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+                  : 'bg-cyan-500/15 border-cyan-500/30 text-cyan-300'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{cloudNotice.text}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCloudNotice(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Action Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            {/* Action 1: Upload / Sync to Firestore */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-lg hover:border-cyan-500/40 transition-colors">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-cyan-500/15 text-cyan-400 border border-cyan-500/30">
+                  <ArrowUpRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-white text-sm">
+                    Subir & Sincronizar Catálogo Completo
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Envía productos, tasas, stock por sucursal y configuración a Firestore.
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Utiliza lotes protegidos de 400 operaciones para garantizar cumplimiento con los estándares de Google Cloud y resguardar la consistencia de inventario en todas las sucursales.
+              </p>
+              <button
+                type="button"
+                onClick={handleUploadAllToFirestore}
+                disabled={isSyncingCloud}
+                className="w-full py-2.5 px-4 bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-black rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              >
+                <Cloud className={`w-4 h-4 ${isSyncingCloud ? 'animate-bounce' : ''}`} />
+                <span>{isSyncingCloud ? 'Sincronizando con Google Cloud...' : '☁️ Subir y Sincronizar Todo a la Nube'}</span>
+              </button>
+            </div>
+
+            {/* Action 2: Download / Pull from Firestore */}
+            <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-lg hover:border-emerald-500/40 transition-colors">
+              <div className="flex items-center gap-3">
+                <div className="p-3 rounded-2xl bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                  <ArrowDownRight className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-white text-sm">
+                    Descargar & Refrescar desde la Nube
+                  </h4>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Restaura o actualiza el catálogo local trayendo los datos más recientes.
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                Ideal al abrir una nueva caja, instalar el sistema en una computadora nueva o sincronizar cambios cargados desde otra sucursal.
+              </p>
+              <button
+                type="button"
+                onClick={handleDownloadAllFromFirestore}
+                disabled={isDownloadingCloud}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-emerald-500/40 font-bold rounded-xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer shadow-md disabled:opacity-50"
+              >
+                <RefreshCw className={`w-4 h-4 ${isDownloadingCloud ? 'animate-spin' : ''}`} />
+                <span>{isDownloadingCloud ? 'Descargando desde Firestore...' : '📥 Descargar Catálogo desde la Nube'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Firestore Collections Live Metrics Strip */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 space-y-4 shadow-lg">
+            <h4 className="font-bold text-white text-sm flex items-center gap-2 border-b border-slate-800 pb-3">
+              <Database className="w-4 h-4 text-cyan-400" />
+              <span>Colecciones y Estructura en Google Cloud Firestore</span>
+            </h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">productos</span>
+                <span className="text-lg font-black text-white font-mono">{productos.length}</span>
+                <span className="text-[10px] text-slate-500 block">Artículos activos</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">inventario</span>
+                <span className="text-lg font-black text-emerald-400 font-mono">{inventario.length}</span>
+                <span className="text-[10px] text-slate-500 block">Separado por sucursal</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">sucursales</span>
+                <span className="text-lg font-black text-cyan-400 font-mono">{sucursales.length}</span>
+                <span className="text-[10px] text-slate-500 block">Tiendas / Almacenes</span>
+              </div>
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800">
+                <span className="text-[10px] text-slate-400 uppercase font-mono block">auditoria</span>
+                <span className="text-lg font-black text-purple-400 font-mono">{auditoriaLogs.length}</span>
+                <span className="text-[10px] text-slate-500 block">Logs inmutables</span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ======================================================== */}

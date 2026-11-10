@@ -70,6 +70,67 @@ export function markTasaSetToday(): void {
   }
 }
 
+export interface BcvRateResult {
+  success: boolean;
+  tasa?: number;
+  fecha?: string;
+  fuente?: string;
+  error?: string;
+}
+
+/**
+ * Consulta la tasa oficial del Banco Central de Venezuela (BCV)
+ * Primero intenta a través del proxy del servidor; si falla o está desconectado,
+ * utiliza un endpoint directo de alta disponibilidad.
+ */
+export async function fetchLiveBcvRate(): Promise<BcvRateResult> {
+  // 1. Intentar a través de la API proxy del servidor
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const resp = await fetch('/api/bcv-rate', { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.success && typeof data.tasa === 'number' && data.tasa > 0) {
+        return {
+          success: true,
+          tasa: +data.tasa.toFixed(2),
+          fecha: data.fecha,
+          fuente: data.fuente || 'Banco Central de Venezuela (BCV Oficial)',
+        };
+      }
+    }
+  } catch (e) {}
+
+  // 2. Intentar endpoint directo como respaldo
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    const resp = await fetch('https://ve.dolarapi.com/v1/dolares/oficial', { signal: controller.signal });
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      const data = await resp.json();
+      const tasa = typeof data.promedio === 'number' ? data.promedio : parseFloat(data.promedio);
+      if (tasa && !isNaN(tasa) && tasa > 0) {
+        return {
+          success: true,
+          tasa: +tasa.toFixed(2),
+          fecha: data.fechaActualizacion,
+          fuente: 'BCV Oficial (Enlace Directo)',
+        };
+      }
+    }
+  } catch (e) {}
+
+  return {
+    success: false,
+    error: 'No se pudo conectar al servicio de tasa oficial del BCV.',
+  };
+}
+
 /**
  * Format currency in USD and Bolívares with safe fallbacks
  */

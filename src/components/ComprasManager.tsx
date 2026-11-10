@@ -107,6 +107,8 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
     numeroFactura: string;
     numeroControl: string;
     fechaFactura: string;
+    fechaVencimiento?: string;
+    diasCredito?: number;
     condicionPago: 'credito' | 'contado';
     items: DetalleCompra[];
     newProducts: Producto[];
@@ -117,6 +119,18 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
     setNumeroControl(data.numeroControl);
     setFechaFactura(data.fechaFactura);
     setCondicionPago(data.condicionPago);
+
+    const days = data.diasCredito || 7;
+    setDiasCredito(days);
+
+    if (data.fechaVencimiento) {
+      setFechaVencimiento(data.fechaVencimiento);
+    } else if (data.fechaFactura) {
+      const base = new Date(data.fechaFactura + 'T12:00:00Z');
+      const vcto = new Date(base.getTime() + days * 24 * 3600 * 1000);
+      setFechaVencimiento(vcto.toISOString().split('T')[0]);
+    }
+
     setItemsCompra(data.items);
     setNewlyCreatedProducts(data.newProducts);
     setModalPos({ x: 0, y: 0 });
@@ -130,10 +144,40 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
   const [numeroFactura, setNumeroFactura] = useState('');
   const [numeroControl, setNumeroControl] = useState('');
   const [fechaFactura, setFechaFactura] = useState(new Date().toISOString().split('T')[0]);
+  const [diasCredito, setDiasCredito] = useState<number>(7);
   const [fechaVencimiento, setFechaVencimiento] = useState(
-    new Date(Date.now() + 15 * 24 * 3600 * 1000).toISOString().split('T')[0]
+    new Date(Date.now() + 7 * 24 * 3600 * 1000).toISOString().split('T')[0]
   );
   const [condicionPago, setCondicionPago] = useState<'credito' | 'contado'>('credito');
+
+  const handleSetDiasCreditoManual = (days: number) => {
+    const valid = Math.max(1, days);
+    setDiasCredito(valid);
+    const base = fechaFactura ? new Date(fechaFactura + 'T12:00:00Z') : new Date();
+    const vcto = new Date(base.getTime() + valid * 24 * 3600 * 1000);
+    setFechaVencimiento(vcto.toISOString().split('T')[0]);
+  };
+
+  const handleFechaVencimientoManual = (vctoStr: string) => {
+    setFechaVencimiento(vctoStr);
+    if (vctoStr && fechaFactura) {
+      const emisionDate = new Date(fechaFactura + 'T12:00:00Z');
+      const vctoDate = new Date(vctoStr + 'T12:00:00Z');
+      const diffDays = Math.round((vctoDate.getTime() - emisionDate.getTime()) / (1000 * 3600 * 24));
+      if (diffDays > 0) {
+        setDiasCredito(diffDays);
+      }
+    }
+  };
+
+  const handleFechaFacturaManual = (emisionStr: string) => {
+    setFechaFactura(emisionStr);
+    if (emisionStr && diasCredito > 0) {
+      const base = new Date(emisionStr + 'T12:00:00Z');
+      const vcto = new Date(base.getTime() + diasCredito * 24 * 3600 * 1000);
+      setFechaVencimiento(vcto.toISOString().split('T')[0]);
+    }
+  };
 
   // Invoiced line items
   const [itemsCompra, setItemsCompra] = useState<DetalleCompra[]>([]);
@@ -326,7 +370,8 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
         numeroFactura: nroFacturaFinal,
         numeroControl: numeroControl.trim() || undefined,
         fecha: fechaFactura || new Date().toISOString(),
-        fechaVencimiento: fechaVencimiento || undefined,
+        fechaVencimiento: condicionPago === 'credito' ? (fechaVencimiento || undefined) : undefined,
+        diasCredito: condicionPago === 'credito' ? diasCredito : undefined,
         condicionPago,
         subtotalNeto: +subtotalNeto.toFixed(2),
         baseImponible: +baseImponible.toFixed(2),
@@ -641,7 +686,7 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
                   <input
                     type="date"
                     value={fechaFactura}
-                    onChange={(e) => setFechaFactura(e.target.value)}
+                    onChange={(e) => handleFechaFacturaManual(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-2.5 py-2 rounded-xl focus:border-emerald-500 focus:outline-none font-mono"
                   />
                 </div>
@@ -935,9 +980,17 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
               {/* RESUMEN FISCAL Y TOTALES DE LA FACTURA */}
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-2 text-xs">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                    Condiciones de Pago y Recepción:
-                  </span>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Condición de Pago & Crédito:
+                    </span>
+                    {condicionPago === 'credito' && (
+                      <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-500/30">
+                        {diasCredito} días de crédito
+                      </span>
+                    )}
+                  </div>
+
                   <div className="grid grid-cols-2 gap-2">
                     <div>
                       <label className="text-[10px] text-slate-400 block mb-1">Condición:</label>
@@ -950,16 +1003,62 @@ export const ComprasManager: React.FC<ComprasManagerProps> = ({
                         <option value="contado">Contado</option>
                       </select>
                     </div>
-                    <div>
-                      <label className="text-[10px] text-slate-400 block mb-1">Fecha Vencimiento:</label>
-                      <input
-                        type="date"
-                        value={fechaVencimiento}
-                        onChange={(e) => setFechaVencimiento(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 text-white text-xs px-2 py-1.5 rounded-lg font-mono"
-                      />
-                    </div>
+
+                    {condicionPago === 'credito' ? (
+                      <div>
+                        <label className="text-[10px] text-slate-400 block mb-1">Fecha Vencimiento:</label>
+                        <input
+                          type="date"
+                          value={fechaVencimiento}
+                          onChange={(e) => handleFechaVencimientoManual(e.target.value)}
+                          className="w-full bg-slate-900 border border-indigo-500/50 text-indigo-200 text-xs px-2 py-1.5 rounded-lg font-mono font-bold"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex items-end pb-1 text-[11px] text-emerald-400 font-semibold">
+                        ✓ Pago de contado inmediato
+                      </div>
+                    )}
                   </div>
+
+                  {condicionPago === 'credito' && (
+                    <div className="bg-indigo-950/30 border border-indigo-500/30 rounded-lg p-2 space-y-1.5">
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[10px] text-indigo-300 font-semibold">Plazo acordado:</span>
+                        <div className="flex items-center gap-1">
+                          {[7, 14, 15, 21, 30].map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => handleSetDiasCreditoManual(d)}
+                              className={`px-2 py-0.5 text-[10px] font-bold rounded transition-all cursor-pointer ${
+                                diasCredito === d
+                                  ? 'bg-indigo-600 text-white shadow-sm'
+                                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                              }`}
+                            >
+                              {d}d
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400">
+                        <span>Personalizar días:</span>
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="number"
+                            min="1"
+                            max="365"
+                            value={diasCredito}
+                            onChange={(e) => handleSetDiasCreditoManual(parseInt(e.target.value) || 1)}
+                            className="w-14 bg-slate-900 border border-slate-700 text-white text-xs px-1.5 py-0.5 rounded text-center font-bold"
+                          />
+                          <span className="text-[10px] text-slate-400">días</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-[10px] text-slate-500">
                     Al procesar, los artículos se suman inmediatamente al stock disponible en la sucursal seleccionada.
                   </p>

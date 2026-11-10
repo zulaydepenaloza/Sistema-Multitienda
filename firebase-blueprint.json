@@ -102,6 +102,18 @@
     "/ventas/{ventaId}": {
       "schema": "Venta",
       "description": "Historial de facturas y ventas realizadas en el POS"
+    },
+    "/inventario/{docId}": {
+      "schema": "Producto",
+      "description": "Existencias de inventario por sucursal"
+    },
+    "/sucursales/{sucursalId}": {
+      "schema": "EmpresaConfig",
+      "description": "Sucursales de la empresa"
+    },
+    "/auditoria/{logId}": {
+      "schema": "Venta",
+      "description": "Registro inmutable de bitácora de auditoría"
     }
   }
 }

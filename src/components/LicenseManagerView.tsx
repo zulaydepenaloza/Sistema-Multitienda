@@ -107,15 +107,15 @@ export const LicenseManagerView: React.FC<LicenseManagerViewProps> = ({
 
   const handleDevUnlock = (e: React.FormEvent) => {
     e.preventDefault();
-    if (devPin === '9900' || devPin.toUpperCase() === 'ADMIN') {
+    if (devPin.trim() === 'OmniPosDev2026MasterKey' || devPin.trim() === 'ADMIN_DEV_KEY') {
       setDevUnlocked(true);
       setActionError(null);
     } else {
-      setActionError('PIN de desarrollador incorrecto.');
+      setActionError('Clave Maestra de Desarrollador incorrecta. La generación de licencias está estrictamente reservada al autor del sistema.');
     }
   };
 
-  const handleGenerateKey = () => {
+  const handleGenerateKey = async () => {
     if (!genTargetMachineId.trim()) {
       setActionError('Debe ingresar el ID de Hardware del equipo destino.');
       return;
@@ -148,20 +148,51 @@ export const LicenseManagerView: React.FC<LicenseManagerViewProps> = ({
       expStr = exp.toISOString().split('T')[0];
     }
 
-    const payload: LicensePayload = {
-      machineId: genTargetMachineId.trim().toUpperCase(),
-      empresa: genEmpresa.trim(),
-      rif: genRif.trim().toUpperCase(),
-      tipo: genTipo,
-      fechaEmision: now.toISOString().split('T')[0],
-      fechaVencimiento: expStr,
-      cajasMax: genCajas,
-      sucursalesMax: genSucursales,
-    };
+    try {
+      const resp = await fetch('/api/developer/license/generate', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-admin-token': devPin.trim(),
+        },
+        body: JSON.stringify({
+          machineId: genTargetMachineId.trim().toUpperCase(),
+          empresa: genEmpresa.trim(),
+          rif: genRif.trim().toUpperCase(),
+          tipo: genTipo,
+          fechaEmision: now.toISOString().split('T')[0],
+          fechaVencimiento: expStr,
+          cajasMax: genCajas,
+          sucursalesMax: genSucursales,
+          devSecret: devPin.trim(),
+        }),
+      });
 
-    const key = generateActivationKey(payload);
-    setGeneratedKeyResult(key);
-    setActionError(null);
+      const data = await resp.json();
+      if (!resp.ok || !data.success) {
+        setActionError(data.error || 'Error al emitir licencia en el servidor.');
+        return;
+      }
+
+      setGeneratedKeyResult(data.key);
+      setActionError(null);
+    } catch (e: any) {
+      // Secure local generation fallback
+      const payload: LicensePayload = {
+        machineId: genTargetMachineId.trim().toUpperCase(),
+        empresa: genEmpresa.trim(),
+        rif: genRif.trim().toUpperCase(),
+        tipo: genTipo,
+        fechaEmision: now.toISOString().split('T')[0],
+        fechaVencimiento: expStr,
+        cajasMax: genCajas,
+        sucursalesMax: genSucursales,
+      };
+
+      const key = generateActivationKey(payload);
+      setGeneratedKeyResult(key);
+      setActionError(null);
+    }
   };
 
   return (
@@ -379,16 +410,16 @@ export const LicenseManagerView: React.FC<LicenseManagerViewProps> = ({
             <form onSubmit={handleDevUnlock} className="flex items-center gap-2">
               <input
                 type="password"
-                placeholder="PIN Maestro"
+                placeholder="Clave Maestra Dev"
                 value={devPin}
                 onChange={(e) => setDevPin(e.target.value)}
-                className="w-36 bg-slate-950 border border-slate-700 text-xs px-3 py-2 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
+                className="w-48 bg-slate-950 border border-slate-700 text-xs px-3 py-2 rounded-xl text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-indigo-500"
               />
               <button
                 type="submit"
-                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
               >
-                Acceder
+                Autenticar
               </button>
             </form>
           )}

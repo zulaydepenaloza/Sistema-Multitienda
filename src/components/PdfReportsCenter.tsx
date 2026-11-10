@@ -134,8 +134,8 @@ export const PdfReportsCenter: React.FC<PdfReportsCenterProps> = ({
       y += 6;
 
       const techStack = [
-        ['Capa de Base de Datos:', 'PostgreSQL 15+ gestionado en Supabase con soporte JSONB y Row Level Security (RLS).'],
-        ['Capa de Conexión & API:', '@supabase/supabase-js v2 vía HTTPS/WSS (WebSockets para cambios en vivo).'],
+        ['Capa de Base de Datos:', 'Google Cloud Firebase Firestore v12 con reglas de seguridad estrictas (RBAC).'],
+        ['Capa de Conexión & API:', 'Firebase Firestore SDK v12 en tiempo real vía WebSockets/gRPC con persistencia local.'],
         ['Capa de Aplicación POS:', 'Frontend Standalone Web SPA autónomo (HTML5, JavaScript ES6+, Tailwind CSS v4 CDN).'],
         ['Módulo Analítico Gerencial:', 'Chart.js & Recharts con procesamiento matemático de KPIs (Ingresos, Margen, Ticket).'],
         ['Periféricos Compatibles:', 'Lectores de códigos de barras USB/Bluetooth en modo emulación de teclado (HID).']

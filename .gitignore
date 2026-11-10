@@ -6,3 +6,6 @@ coverage/
 *.log
 .env*
 !.env.example
+data/server_db.json
+*.zip
+*.bak

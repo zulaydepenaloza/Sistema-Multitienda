@@ -147,6 +147,7 @@ export interface Compra {
   numeroControl?: string;
   fecha: string;
   fechaVencimiento?: string;
+  diasCredito?: number;
   condicionPago?: 'credito' | 'contado';
   subtotalNeto?: number;
   baseImponible?: number;
